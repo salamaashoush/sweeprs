@@ -1,6 +1,28 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0] - 2026-02-06
+
+### Features
+
+- Add install script to download release from GitHub
+- Improve scanner accuracy with hardlink dedup, physical sizes, and cross-volume boundaries
+- Add CLI command timeouts and diskutil APFS prefetch
+- Report purgeable space, APFS snapshot sizes, and Time Machine snapshot sizes
+- Segmented disk bar, inline size bars, and reveal-in-Finder
+- Add upgrade and completions subcommands
+
+### Bug Fixes
+
+- Remove full scan from monitor daemon, add notification cooldown and clean shutdown
+
+### Performance
+
+- Warm caches before rayon scan and show current rule in progress
+
+### Styling
+
+- Apply cargo fmt across entire codebase
 ## [0.1.0] - 2026-02-06
 
 ### Features
