@@ -37,13 +37,33 @@ dry-run by default.
 
 ## Installation
 
+### Quick install (latest release)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/salamaashoush/sweeprs/main/scripts/install.sh | bash
+```
+
+Or install a specific version:
+
+```bash
+VERSION=0.1.0 curl -fsSL https://raw.githubusercontent.com/salamaashoush/sweeprs/main/scripts/install.sh | bash
+```
+
+Custom install directory:
+
+```bash
+INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/salamaashoush/sweeprs/main/scripts/install.sh | bash
+```
+
+### Build from source
+
 Requires Rust 1.85+ (nightly recommended for edition 2024).
 
 ```bash
 cargo install --path .
 ```
 
-Or build from source:
+Or:
 
 ```bash
 git clone https://github.com/salamaashoush/sweeprs.git
