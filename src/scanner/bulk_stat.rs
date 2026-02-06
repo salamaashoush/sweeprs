@@ -85,7 +85,13 @@ pub fn dir_size_and_count_bulk(path: &Path) -> (u64, usize) {
     let mut total = 0u64;
     let mut count = 0usize;
     let mut seen_inodes = rustc_hash::FxHashSet::default();
-    scan_recursive(path, &mut total, Some(&mut count), &mut seen_inodes, root_dev);
+    scan_recursive(
+        path,
+        &mut total,
+        Some(&mut count),
+        &mut seen_inodes,
+        root_dev,
+    );
     (total, count)
 }
 
@@ -108,7 +114,12 @@ fn scan_recursive(
     let mut al = AttrList {
         bitmapcount: ATTR_BIT_MAP_COUNT,
         reserved: 0,
-        commonattr: ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_DEVID | ATTR_CMN_ERROR | ATTR_CMN_OBJTYPE | ATTR_CMN_FILEID,
+        commonattr: ATTR_CMN_RETURNED_ATTRS
+            | ATTR_CMN_NAME
+            | ATTR_CMN_DEVID
+            | ATTR_CMN_ERROR
+            | ATTR_CMN_OBJTYPE
+            | ATTR_CMN_FILEID,
         volattr: 0,
         dirattr: 0,
         fileattr: ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE,
@@ -239,7 +250,10 @@ fn parse_entry(entry: &[u8]) -> ParsedEntry {
         let name_start = pos.wrapping_add(data_offset as usize);
         if name_start < entry.len() {
             let name_bytes: &[u8] = &entry[name_start..];
-            let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+            let end = name_bytes
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(name_bytes.len());
             name = String::from_utf8_lossy(&name_bytes[..end]).into_owned();
         }
         pos += 8;

@@ -21,8 +21,7 @@ pub struct CliResult {
 /// equals max(individual latencies) instead of their sum.
 /// Each command has a 5-second timeout to prevent any single command from
 /// blocking the entire cache.
-pub static CLI_CACHE: LazyLock<FxHashMap<&'static str, CliResult>> =
-    LazyLock::new(prefetch_all);
+pub static CLI_CACHE: LazyLock<FxHashMap<&'static str, CliResult>> = LazyLock::new(prefetch_all);
 
 /// Run a command with a timeout. Returns None if the command times out or fails to spawn.
 fn run_with_timeout(args: &[&str], timeout: Duration) -> Option<std::process::Output> {
@@ -68,7 +67,10 @@ fn run_with_timeout(args: &[&str], timeout: Duration) -> Option<std::process::Ou
 
 fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
     let commands: &[(&str, &[&str])] = &[
-        ("rustup_active_toolchain", &["rustup", "show", "active-toolchain"]),
+        (
+            "rustup_active_toolchain",
+            &["rustup", "show", "active-toolchain"],
+        ),
         ("node_version", &["node", "--version"]),
         ("python3_version", &["python3", "--version"]),
         ("ruby_version", &["ruby", "--version"]),

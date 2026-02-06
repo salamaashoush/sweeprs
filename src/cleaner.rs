@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -48,7 +48,11 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
 
     println!(
         "Items to {}:",
-        if options.dry_run { "clean (dry run)" } else { "clean" }
+        if options.dry_run {
+            "clean (dry run)"
+        } else {
+            "clean"
+        }
     );
 
     for entry in &filtered {
@@ -72,7 +76,10 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
     );
 
     if !options.include_unsafe {
-        let unsafe_count = entries.iter().filter(|e| e.safety != SafetyLevel::Safe).count();
+        let unsafe_count = entries
+            .iter()
+            .filter(|e| e.safety != SafetyLevel::Safe)
+            .count();
         if unsafe_count > 0 {
             let unsafe_size: u64 = entries
                 .iter()
@@ -173,10 +180,7 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
     let cleaned = cleaned.load(Ordering::Relaxed);
     let errors = errors.into_inner().unwrap();
 
-    println!(
-        "\nCleaned: {}",
-        util::human_size(cleaned).green().bold()
-    );
+    println!("\nCleaned: {}", util::human_size(cleaned).green().bold());
 
     if !errors.is_empty() {
         println!("\nErrors:");

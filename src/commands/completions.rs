@@ -72,7 +72,9 @@ fn install_completions(shell: Shell) -> Result<()> {
         Shell::Bash => (find_bash_config()?, generate_bash_hook()),
         Shell::Zsh => (find_zsh_config()?, generate_zsh_hook()),
         Shell::Fish => (find_fish_config()?, generate_fish_hook()),
-        _ => bail!("automatic installation is not supported for {shell:?} -- generate manually with: sweeprs completions {shell:?}"),
+        _ => bail!(
+            "automatic installation is not supported for {shell:?} -- generate manually with: sweeprs completions {shell:?}"
+        ),
     };
 
     eprintln!("Install shell completions");
@@ -86,8 +88,7 @@ fn install_completions(shell: Shell) -> Result<()> {
         let content = std::fs::read_to_string(&config_file)?;
         if content.contains("sweeprs completions") {
             // Check if zsh hook needs compdef update
-            let needs_update =
-                matches!(shell, Shell::Zsh) && !content.contains("compdef _sweeprs");
+            let needs_update = matches!(shell, Shell::Zsh) && !content.contains("compdef _sweeprs");
 
             if needs_update {
                 eprintln!("  Existing hook is outdated, replacing...");
@@ -113,10 +114,7 @@ fn install_completions(shell: Shell) -> Result<()> {
 
     writeln!(file)?;
     writeln!(file, "# sweeprs shell completions")?;
-    writeln!(
-        file,
-        "# Added by: sweeprs completions {shell:?} --install"
-    )?;
+    writeln!(file, "# Added by: sweeprs completions {shell:?} --install")?;
     writeln!(
         file,
         "# Dynamically loads from the binary so it auto-updates on upgrade"
@@ -204,8 +202,7 @@ end
 // -- Shell config file detection -----------------------------------------------
 
 fn find_bash_config() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not find home directory"))?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("could not find home directory"))?;
 
     for name in &[".bashrc", ".bash_profile", ".profile"] {
         let candidate = home.join(name);
@@ -218,8 +215,7 @@ fn find_bash_config() -> Result<PathBuf> {
 }
 
 fn find_zsh_config() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not find home directory"))?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("could not find home directory"))?;
 
     for name in &[".zshrc", ".zprofile"] {
         let candidate = home.join(name);
@@ -232,8 +228,8 @@ fn find_zsh_config() -> Result<PathBuf> {
 }
 
 fn find_fish_config() -> Result<PathBuf> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not find config directory"))?;
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("could not find config directory"))?;
 
     Ok(config_dir.join("fish").join("config.fish"))
 }

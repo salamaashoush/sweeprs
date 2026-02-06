@@ -201,10 +201,17 @@ fn apply_filter(
     exclude: &[String],
     min_size: Option<String>,
 ) -> Result<()> {
-    let min_bytes = min_size.map(|s| filter::parse_size(&s)).transpose()?.unwrap_or(0);
+    let min_bytes = min_size
+        .map(|s| filter::parse_size(&s))
+        .transpose()?
+        .unwrap_or(0);
     let entry_filter = filter::EntryFilter::new(filters, exclude, min_bytes)?;
     if entry_filter.is_active() {
-        let kept: Vec<_> = entry_filter.apply(&result.entries).into_iter().cloned().collect();
+        let kept: Vec<_> = entry_filter
+            .apply(&result.entries)
+            .into_iter()
+            .cloned()
+            .collect();
         result.total_size = kept.iter().map(|e| e.size).sum();
         result.entries = kept;
     }
@@ -223,12 +230,21 @@ fn print_scan_summary(result: &scanner::entry::ScanResult) {
     );
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         None => tui::run()?,
-        Some(Command::Scan { json, category, filters, exclude, min_size, save, load }) => {
+        Some(Command::Scan {
+            json,
+            category,
+            filters,
+            exclude,
+            min_size,
+            save,
+            load,
+        }) => {
             let config = config::Config::load()?;
             let mut result = if let Some(ref load_path) = load {
                 let data = std::fs::read_to_string(load_path)?;
@@ -260,7 +276,15 @@ fn main() -> Result<()> {
                 output::print_table(&result);
             }
         }
-        Some(Command::Clean { target, force, yes, all, filters, exclude, min_size }) => {
+        Some(Command::Clean {
+            target,
+            force,
+            yes,
+            all,
+            filters,
+            exclude,
+            min_size,
+        }) => {
             let config = config::Config::load()?;
             let mut result = if let Some(category) = target.to_category() {
                 scanner::scan_category_with_progress(&config, category)?

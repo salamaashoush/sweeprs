@@ -47,10 +47,7 @@ const DEPS_MARKERS: &[(&str, &str, &str)] = &[
 pub struct BuildArtifactRule;
 pub struct InstalledDepsRule;
 
-fn collect_entries(
-    dirs: &[(PathBuf, &'static str)],
-    category: Category,
-) -> Vec<ScannedEntry> {
+fn collect_entries(dirs: &[(PathBuf, &'static str)], category: Category) -> Vec<ScannedEntry> {
     let mut entries: Vec<ScannedEntry> = dirs
         .par_iter()
         .filter_map(|(path, description)| {
@@ -77,14 +74,13 @@ fn collect_entries(
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     entries.dedup_by(|later, earlier| {
         let dominated = later.description == earlier.description
-            && later.path.parent().is_some_and(|lp| {
-                earlier.path.parent().is_some_and(|ep| lp.starts_with(ep))
-            });
+            && later
+                .path
+                .parent()
+                .is_some_and(|lp| earlier.path.parent().is_some_and(|ep| lp.starts_with(ep)));
         if dominated {
             earlier.size += later.size;
-            if let (Some(ec), Some(lc)) =
-                (&mut earlier.item_count, later.item_count)
-            {
+            if let (Some(ec), Some(lc)) = (&mut earlier.item_count, later.item_count) {
                 *ec += lc;
             }
         }

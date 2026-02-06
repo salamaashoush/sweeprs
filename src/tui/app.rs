@@ -188,9 +188,7 @@ impl App {
                             } else if let Some(parent) = Tree::parent(row) {
                                 // Jump to parent
                                 let new_visible = self.tree.visible_rows();
-                                if let Some(pos) =
-                                    new_visible.iter().position(|r| *r == parent)
-                                {
+                                if let Some(pos) = new_visible.iter().position(|r| *r == parent) {
                                     self.cursor = pos;
                                     self.clamp_scroll();
                                 }

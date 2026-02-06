@@ -6,9 +6,9 @@ pub mod walker;
 #[cfg(target_os = "macos")]
 pub mod bulk_stat;
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
@@ -17,8 +17,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::config::Config;
 use crate::platform;
-use crate::rules::{RuleEngine, ScanProgress};
 pub use crate::rules::ScanUpdate;
+use crate::rules::{RuleEngine, ScanProgress};
 use crate::util;
 
 use entry::{Category, ScanResult};

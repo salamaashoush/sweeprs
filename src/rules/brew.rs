@@ -42,9 +42,7 @@ impl CleanupRule for BrewCleanupRule {
             size,
             category: Category::PackageCache,
             safety: SafetyLevel::Safe,
-            description: format!(
-                "Homebrew outdated cache ({item_count} items, brew cleanup)"
-            ),
+            description: format!("Homebrew outdated cache ({item_count} items, brew cleanup)"),
             item_count: Some(item_count),
         }]
     }
@@ -142,17 +140,15 @@ fn parse_brew_size(s: &str) -> u64 {
 
 /// Run the appropriate brew command for a synthetic `brew:` entry.
 pub fn clean_brew_entry(entry_path: &str) -> Result<(), std::io::Error> {
-    let type_key = entry_path
-        .strip_prefix("brew:")
-        .unwrap_or(entry_path);
+    let type_key = entry_path.strip_prefix("brew:").unwrap_or(entry_path);
 
     let args: &[&str] = match type_key {
         "cleanup" => &["cleanup"],
         "autoremove" => &["autoremove"],
         _ => {
-            return Err(std::io::Error::other(
-                format!("unknown brew type: {type_key}"),
-            ));
+            return Err(std::io::Error::other(format!(
+                "unknown brew type: {type_key}"
+            )));
         }
     };
 
@@ -165,15 +161,13 @@ pub fn clean_brew_entry(entry_path: &str) -> Result<(), std::io::Error> {
     if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(
-            format!("brew {} failed with exit code {status}", args.join(" ")),
-        ))
+        Err(std::io::Error::other(format!(
+            "brew {} failed with exit code {status}",
+            args.join(" ")
+        )))
     }
 }
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
-    vec![
-        Box::new(BrewCleanupRule),
-        Box::new(BrewAutoremoveRule),
-    ]
+    vec![Box::new(BrewCleanupRule), Box::new(BrewAutoremoveRule)]
 }

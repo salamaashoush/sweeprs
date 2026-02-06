@@ -4,8 +4,6 @@ use yansi::Paint;
 use crate::scanner::entry::{Category, DiskInfo, SafetyLevel, ScanResult, ScannedEntry};
 use crate::util;
 
-
-
 pub fn print_table(result: &ScanResult) {
     print_header(result);
 
@@ -134,10 +132,7 @@ fn print_disk_info(disk: &DiskInfo) {
         util::human_size(disk.available_bytes).green()
     );
     if let Some(purgeable) = disk.purgeable_bytes {
-        println!(
-            "Purgeable: {}",
-            util::human_size(purgeable).green()
-        );
+        println!("Purgeable: {}", util::human_size(purgeable).green());
     }
     if disk.snapshot_bytes > 0 {
         println!(

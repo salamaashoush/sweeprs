@@ -125,8 +125,7 @@ fn download_release(tag: &str) -> Result<(tempfile::TempDir, PathBuf)> {
     let filename = format!("{BINARY_NAME}-{tag}-{target}.tar.gz");
     let url = format!("https://github.com/{REPO}/releases/download/{tag}/{filename}");
 
-    let temp_dir =
-        tempfile::tempdir().context("failed to create temp directory")?;
+    let temp_dir = tempfile::tempdir().context("failed to create temp directory")?;
 
     let archive_path = temp_dir.path().join(&filename);
 
@@ -137,7 +136,9 @@ fn download_release(tag: &str) -> Result<(tempfile::TempDir, PathBuf)> {
             "--max-time",
             "120",
             "-o",
-            archive_path.to_str().expect("temp path should be valid UTF-8"),
+            archive_path
+                .to_str()
+                .expect("temp path should be valid UTF-8"),
             &url,
         ])
         .output()
@@ -158,9 +159,13 @@ fn download_release(tag: &str) -> Result<(tempfile::TempDir, PathBuf)> {
     let output = Command::new("tar")
         .args([
             "-xzf",
-            archive_path.to_str().expect("archive path should be valid UTF-8"),
+            archive_path
+                .to_str()
+                .expect("archive path should be valid UTF-8"),
             "-C",
-            extract_dir.to_str().expect("extract dir should be valid UTF-8"),
+            extract_dir
+                .to_str()
+                .expect("extract dir should be valid UTF-8"),
         ])
         .output()
         .context("failed to run tar")?;

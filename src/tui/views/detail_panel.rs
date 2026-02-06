@@ -87,7 +87,12 @@ fn render_group_detail(tree: &crate::tui::tree::Tree, ci: usize, gi: usize) -> V
     ]
 }
 
-fn render_entry_detail(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, ei: usize) -> Vec<Line<'static>> {
+fn render_entry_detail(
+    tree: &crate::tui::tree::Tree,
+    ci: usize,
+    gi: usize,
+    ei: usize,
+) -> Vec<Line<'static>> {
     let entry = &tree.categories[ci].groups[gi].entries[ei];
     let safety_color = safety_to_color(entry.safety);
 
@@ -123,14 +128,8 @@ fn render_entry_detail(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, ei: 
 
 fn detail_line(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(
-            format!("  {label}:  "),
-            Style::default().fg(theme::DIM),
-        ),
-        Span::styled(
-            value.to_string(),
-            Style::default().fg(theme::FG).bold(),
-        ),
+        Span::styled(format!("  {label}:  "), Style::default().fg(theme::DIM)),
+        Span::styled(value.to_string(), Style::default().fg(theme::FG).bold()),
     ])
 }
 

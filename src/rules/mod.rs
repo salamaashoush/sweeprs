@@ -16,17 +16,25 @@ pub mod system;
 pub mod toolchain;
 pub mod trash;
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 
 use crate::config::Config;
 use crate::scanner::entry::{Category, DiskInfo, ScanResult, ScannedEntry};
 
 pub enum ScanUpdate {
-    Started { rules_total: usize },
-    RuleComplete { rule_name: &'static str, entries: Vec<ScannedEntry> },
-    Finished { duration_secs: f64, disk_info: Option<DiskInfo> },
+    Started {
+        rules_total: usize,
+    },
+    RuleComplete {
+        rule_name: &'static str,
+        entries: Vec<ScannedEntry>,
+    },
+    Finished {
+        duration_secs: f64,
+        disk_info: Option<DiskInfo>,
+    },
 }
 
 pub struct ScanProgress {

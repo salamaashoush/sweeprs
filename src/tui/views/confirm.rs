@@ -78,27 +78,23 @@ pub fn render(f: &mut Frame, area: Rect, entries: &[ScannedEntry]) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled(
-            "  [y] Confirm  ",
-            Style::default().fg(theme::GREEN).bold(),
-        ),
-        Span::styled(
-            "  [n/Esc] Cancel  ",
-            Style::default().fg(theme::RED).bold(),
-        ),
+        Span::styled("  [y] Confirm  ", Style::default().fg(theme::GREEN).bold()),
+        Span::styled("  [n/Esc] Cancel  ", Style::default().fg(theme::RED).bold()),
     ]));
 
-    let border_color = if has_danger { theme::RED } else { theme::ACCENT };
+    let border_color = if has_danger {
+        theme::RED
+    } else {
+        theme::ACCENT
+    };
 
-    let dialog = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .title(" Confirm Deletion ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color))
-                .style(Style::default().bg(theme::BG)),
-        );
+    let dialog = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title(" Confirm Deletion ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(theme::BG)),
+    );
 
     f.render_widget(dialog, dialog_area);
 }

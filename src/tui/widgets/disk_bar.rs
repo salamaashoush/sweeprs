@@ -45,7 +45,10 @@ impl Widget for DiskBar<'_> {
 
         // Segments: scanned (green), purgeable (cyan), snapshots (yellow), other used (dim), free (bg)
         let scanned = self.total_scanned.min(used);
-        let other_used = used.saturating_sub(scanned).saturating_sub(purgeable).saturating_sub(snapshot);
+        let other_used = used
+            .saturating_sub(scanned)
+            .saturating_sub(purgeable)
+            .saturating_sub(snapshot);
 
         let bar_width = u64::from(inner.width);
 
@@ -55,7 +58,8 @@ impl Widget for DiskBar<'_> {
         let seg_other = ((other_used as f64 / total as f64) * bar_width as f64).round() as u16;
 
         // Clamp total segments to bar_width
-        let filled_total = (seg_scanned + seg_purgeable + seg_snapshot + seg_other).min(inner.width);
+        let filled_total =
+            (seg_scanned + seg_purgeable + seg_snapshot + seg_other).min(inner.width);
         let seg_free = inner.width.saturating_sub(filled_total);
 
         // Paint the bar segments
@@ -73,9 +77,7 @@ impl Widget for DiskBar<'_> {
         for &(width, color) in segments {
             for dx in 0..width {
                 if x + dx < inner.x + inner.width {
-                    buf[(x + dx, y)]
-                        .set_char('\u{2588}')
-                        .set_fg(color);
+                    buf[(x + dx, y)].set_char('\u{2588}').set_fg(color);
                 }
             }
             x += width;
@@ -83,11 +85,12 @@ impl Widget for DiskBar<'_> {
 
         // Build label
         let label = if purgeable > 0 || snapshot > 0 {
-            let mut parts = vec![
-                format!("{} used", util::human_size(used)),
-            ];
+            let mut parts = vec![format!("{} used", util::human_size(used))];
             if self.total_scanned > 0 {
-                parts.push(format!("{} reclaimable", util::human_size(self.total_scanned)));
+                parts.push(format!(
+                    "{} reclaimable",
+                    util::human_size(self.total_scanned)
+                ));
             }
             if purgeable > 0 {
                 parts.push(format!("{} purgeable", util::human_size(purgeable)));

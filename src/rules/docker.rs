@@ -58,10 +58,7 @@ impl DockerRule {
             }
 
             let size_str = cols[2]; // SIZE column
-            let reclaimable_str = cols
-                .last()
-                .unwrap_or(&"0B")
-                .trim_end_matches(['%', ')']);
+            let reclaimable_str = cols.last().unwrap_or(&"0B").trim_end_matches(['%', ')']);
 
             if let Some(size) = parse_docker_size(size_str) {
                 if size > 0 {
@@ -70,9 +67,7 @@ impl DockerRule {
                         size,
                         category: Category::Docker,
                         safety: SafetyLevel::Caution,
-                        description: format!(
-                            "Docker {type_name} (reclaimable: {reclaimable_str})"
-                        ),
+                        description: format!("Docker {type_name} (reclaimable: {reclaimable_str})"),
                         item_count: None,
                     });
                 }
@@ -101,7 +96,10 @@ fn parse_docker_size(s: &str) -> Option<u64> {
         return None;
     };
 
-    num_str.parse::<f64>().ok().map(|n| (n * unit as f64) as u64)
+    num_str
+        .parse::<f64>()
+        .ok()
+        .map(|n| (n * unit as f64) as u64)
 }
 
 /// Run the appropriate `docker ... prune` command for a Docker entry.
@@ -111,9 +109,7 @@ fn parse_docker_size(s: &str) -> Option<u64> {
 ///
 /// Returns `Ok(())` on success, or an error if the command fails.
 pub fn clean_docker_entry(entry_path: &str) -> Result<(), std::io::Error> {
-    let type_key = entry_path
-        .strip_prefix("docker:")
-        .unwrap_or(entry_path);
+    let type_key = entry_path.strip_prefix("docker:").unwrap_or(entry_path);
 
     let Some(args) = DOCKER_TYPES
         .iter()
@@ -135,9 +131,11 @@ pub fn clean_docker_entry(entry_path: &str) -> Result<(), std::io::Error> {
     if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(
-            format!("docker {} failed with exit code {}", args.join(" "), status),
-        ))
+        Err(std::io::Error::other(format!(
+            "docker {} failed with exit code {}",
+            args.join(" "),
+            status
+        )))
     }
 }
 

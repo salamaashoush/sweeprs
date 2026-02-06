@@ -72,7 +72,6 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
             std::thread::sleep(TICK.min(deadline - Instant::now()));
         }
     }
-
 }
 
 fn should_notify(last: Option<&Instant>) -> bool {

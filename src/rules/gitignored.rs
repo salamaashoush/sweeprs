@@ -71,7 +71,10 @@ fn is_gitignored_by_ancestor(root: &Path, all_roots: &[PathBuf]) -> bool {
         // `matched_path_or_any_parents` checks root AND every intermediate
         // directory between `ancestor` and `root`, so if `.tmp/` is
         // ignored it will match even when root is `.tmp/subdir/`.
-        if gitignore.matched_path_or_any_parents(root, true).is_ignore() {
+        if gitignore
+            .matched_path_or_any_parents(root, true)
+            .is_ignore()
+        {
             return true;
         }
     }
@@ -97,9 +100,10 @@ fn find_ignored_in_project(root: &Path) -> Vec<(PathBuf, String)> {
         return Vec::new();
     };
 
-    let project_name = root
-        .file_name()
-        .map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().to_string());
+    let project_name = root.file_name().map_or_else(
+        || root.display().to_string(),
+        |n| n.to_string_lossy().to_string(),
+    );
 
     let mut found = Vec::new();
 

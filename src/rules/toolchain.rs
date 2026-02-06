@@ -24,13 +24,7 @@ impl CleanupRule for RustToolchainRule {
         }
 
         let active_toolchain = cli_cache::get("rustup_active_toolchain")
-            .map(|r| {
-                r.stdout
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .to_owned()
-            })
+            .map(|r| r.stdout.split_whitespace().next().unwrap_or("").to_owned())
             .unwrap_or_default();
 
         let mut entries = Vec::new();
@@ -138,7 +132,10 @@ impl CleanupRule for PythonVersionsRule {
         let active_version = cli_cache::get("python3_version")
             .and_then(|r| {
                 // Output is "Python 3.x.y"
-                r.stdout.split_whitespace().nth(1).map(|v| v.trim().to_owned())
+                r.stdout
+                    .split_whitespace()
+                    .nth(1)
+                    .map(|v| v.trim().to_owned())
             })
             .unwrap_or_default();
 
@@ -257,7 +254,11 @@ impl CleanupRule for JavaVersionsRule {
         // java --version outputs to stderr on some versions, stdout on others
         let active_version = cli_cache::get_raw("java_version")
             .and_then(|r| {
-                let output = if r.stdout.is_empty() { &r.stderr } else { &r.stdout };
+                let output = if r.stdout.is_empty() {
+                    &r.stderr
+                } else {
+                    &r.stdout
+                };
                 // First line is like "openjdk 21.0.1 2023-10-17"
                 output
                     .lines()

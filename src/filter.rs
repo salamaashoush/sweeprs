@@ -102,10 +102,7 @@ fn match_basename(gs: &GlobSet, path: &Path) -> bool {
 }
 
 /// Split patterns into basename and path glob sets based on whether they contain `/`.
-fn split_patterns(
-    patterns: &[String],
-    home: &str,
-) -> Result<(Option<GlobSet>, Option<GlobSet>)> {
+fn split_patterns(patterns: &[String], home: &str) -> Result<(Option<GlobSet>, Option<GlobSet>)> {
     let mut base_builder = GlobSetBuilder::new();
     let mut path_builder = GlobSetBuilder::new();
     let mut has_base = false;
@@ -115,13 +112,13 @@ fn split_patterns(
         let expanded = expand_tilde(raw, home);
 
         if expanded.contains('/') {
-            let glob = Glob::new(&expanded)
-                .with_context(|| format!("bad glob pattern: {expanded}"))?;
+            let glob =
+                Glob::new(&expanded).with_context(|| format!("bad glob pattern: {expanded}"))?;
             path_builder.add(glob);
             has_path = true;
         } else {
-            let glob = Glob::new(&expanded)
-                .with_context(|| format!("bad glob pattern: {expanded}"))?;
+            let glob =
+                Glob::new(&expanded).with_context(|| format!("bad glob pattern: {expanded}"))?;
             base_builder.add(glob);
             has_base = true;
         }

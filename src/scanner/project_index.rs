@@ -44,18 +44,12 @@ pub struct ProjectIndex {
 impl ProjectIndex {
     fn build() -> Self {
         let home = dirs::home_dir().unwrap_or_default();
-        let search_roots: Vec<PathBuf> = [
-            "Workspace",
-            "Projects",
-            "Developer",
-            "Code",
-            "src",
-            "dev",
-        ]
-        .iter()
-        .map(|name| home.join(name))
-        .filter(|p| p.exists())
-        .collect();
+        let search_roots: Vec<PathBuf> =
+            ["Workspace", "Projects", "Developer", "Code", "src", "dev"]
+                .iter()
+                .map(|name| home.join(name))
+                .filter(|p| p.exists())
+                .collect();
 
         // Walk each root in parallel via rayon.
         let results: Vec<(Vec<IndexedDir>, Vec<PathBuf>)> = search_roots
@@ -115,12 +109,7 @@ impl ProjectIndex {
     }
 }
 
-fn walk_dir(
-    dir: &Path,
-    depth: usize,
-    dirs: &mut Vec<IndexedDir>,
-    git_roots: &mut Vec<PathBuf>,
-) {
+fn walk_dir(dir: &Path, depth: usize, dirs: &mut Vec<IndexedDir>, git_roots: &mut Vec<PathBuf>) {
     if depth >= MAX_SCAN_DEPTH {
         return;
     }

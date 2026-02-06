@@ -37,9 +37,7 @@ impl CleanupRule for OldDownloadsRule {
                 continue;
             };
 
-            let modified = metadata
-                .modified()
-                .unwrap_or(SystemTime::UNIX_EPOCH);
+            let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
 
             let age = now.duration_since(modified).unwrap_or_default();
 

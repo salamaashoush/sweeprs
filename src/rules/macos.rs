@@ -20,7 +20,11 @@ impl CleanupRule for TimeMachineSnapshotsRule {
             return Vec::new();
         };
 
-        let snapshot_count = result.stdout.lines().filter(|l| l.contains("com.apple.")).count();
+        let snapshot_count = result
+            .stdout
+            .lines()
+            .filter(|l| l.contains("com.apple."))
+            .count();
 
         if snapshot_count == 0 {
             return Vec::new();
@@ -53,7 +57,9 @@ fn parse_snapshot_sizes() -> u64 {
                 if following.contains("Snapshot Disk Size:") {
                     if let Some(start) = following.find('(') {
                         if let Some(end) = following[start..].find(" Bytes)") {
-                            if let Ok(bytes) = following[start + 1..start + end].trim().parse::<u64>() {
+                            if let Ok(bytes) =
+                                following[start + 1..start + end].trim().parse::<u64>()
+                            {
                                 total += bytes;
                             }
                         }

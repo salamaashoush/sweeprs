@@ -77,7 +77,9 @@ fn parse_snapshot_bytes() -> u64 {
                     // Extract byte count from pattern like "(123456789 Bytes)"
                     if let Some(start) = following.find('(') {
                         if let Some(end) = following[start..].find(" Bytes)") {
-                            if let Ok(bytes) = following[start + 1..start + end].trim().parse::<u64>() {
+                            if let Ok(bytes) =
+                                following[start + 1..start + end].trim().parse::<u64>()
+                            {
                                 total += bytes;
                             }
                         }
@@ -101,5 +103,8 @@ fn parse_plist_integer(xml: &str, key: &str) -> Option<u64> {
     let after_key = &xml[key_pos + key_tag.len()..];
     let int_start = after_key.find("<integer>")? + "<integer>".len();
     let int_end = after_key[int_start..].find("</integer>")?;
-    after_key[int_start..int_start + int_end].trim().parse().ok()
+    after_key[int_start..int_start + int_end]
+        .trim()
+        .parse()
+        .ok()
 }

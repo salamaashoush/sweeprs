@@ -16,7 +16,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if app.scanning {
         spans.push(Span::styled(
-            format!(" Scanning {}/{} rules", app.scan_rules_done, app.scan_rules_total),
+            format!(
+                " Scanning {}/{} rules",
+                app.scan_rules_done, app.scan_rules_total
+            ),
             Style::default().fg(theme::ACCENT).bold(),
         ));
         spans.push(Span::styled(" | ", Style::default().fg(theme::DIM)));
@@ -24,7 +27,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if sel_count > 0 {
         spans.push(Span::styled(
-            format!(" Selected: {sel_count} item{}", if sel_count == 1 { "" } else { "s" }),
+            format!(
+                " Selected: {sel_count} item{}",
+                if sel_count == 1 { "" } else { "s" }
+            ),
             Style::default().fg(theme::FG),
         ));
         spans.push(Span::styled(
@@ -45,10 +51,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let left_len: usize = spans.iter().map(Span::width).sum();
     let area_width = area.width as usize;
     let padding = area_width.saturating_sub(left_len + right.len());
-    spans.push(Span::styled(
-        " ".repeat(padding),
-        Style::default(),
-    ));
+    spans.push(Span::styled(" ".repeat(padding), Style::default()));
     spans.push(Span::styled(
         right,
         Style::default().fg(theme::GREEN).bold(),

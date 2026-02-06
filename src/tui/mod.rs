@@ -43,7 +43,7 @@ pub fn run() -> Result<()> {
 
         terminal.draw(|f| {
             let chunks = Layout::vertical([
-                Constraint::Length(3),  // disk bar
+                Constraint::Length(3), // disk bar
                 Constraint::Min(5),    // main content: tree + detail
                 Constraint::Length(1), // status bar
                 Constraint::Length(1), // help bar
@@ -52,13 +52,12 @@ pub fn run() -> Result<()> {
 
             // Disk bar / scanning progress
             if let Some(ref disk_info) = app.result.disk_info {
-                DiskBar::new(disk_info, app.tree.total_reclaimable()).render(chunks[0], f.buffer_mut());
+                DiskBar::new(disk_info, app.tree.total_reclaimable())
+                    .render(chunks[0], f.buffer_mut());
             } else if app.scanning {
                 let scanning_text = format!(
                     " Scanning... {}/{} rules | {}",
-                    app.scan_rules_done,
-                    app.scan_rules_total,
-                    app.last_rule_name,
+                    app.scan_rules_done, app.scan_rules_total, app.last_rule_name,
                 );
                 let scanning = ratatui::widgets::Paragraph::new(scanning_text)
                     .style(Style::default().fg(theme::ACCENT))
