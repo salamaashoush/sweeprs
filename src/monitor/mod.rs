@@ -2,6 +2,8 @@ pub mod daemon;
 pub mod notify;
 
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, anyhow};
 
@@ -25,7 +27,7 @@ pub fn start() -> Result<()> {
         .args(["monitor", "--foreground"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .spawn()?;
 
     let pid = child.id();
@@ -90,14 +92,17 @@ pub fn run_foreground() -> Result<()> {
     }
     std::fs::write(&pid_path, pid.to_string())?;
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_signal = Arc::clone(&shutdown);
+
     ctrlc::set_handler(move || {
-        let _ = std::fs::remove_file(daemon::pid_file_path());
-        std::process::exit(0);
+        shutdown_signal.store(true, Ordering::Relaxed);
     })?;
 
     eprintln!("[sweeprs monitor] Starting (PID: {pid})");
-    daemon::run_loop(&config)?;
+    daemon::run_loop(&config, &shutdown);
 
+    let _ = std::fs::remove_file(&pid_path);
     Ok(())
 }
 
