@@ -133,6 +133,18 @@ fn print_disk_info(disk: &DiskInfo) {
         "Available: {}",
         util::human_size(disk.available_bytes).green()
     );
+    if let Some(purgeable) = disk.purgeable_bytes {
+        println!(
+            "Purgeable: {}",
+            util::human_size(purgeable).green()
+        );
+    }
+    if disk.snapshot_bytes > 0 {
+        println!(
+            "Snapshots: {}",
+            util::human_size(disk.snapshot_bytes).yellow()
+        );
+    }
 }
 
 fn print_footer(result: &ScanResult, grouped: &IndexMap<Category, Vec<ScannedEntry>>) {

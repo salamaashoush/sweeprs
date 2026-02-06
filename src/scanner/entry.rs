@@ -143,4 +143,6 @@ pub struct DiskInfo {
     pub available_bytes: u64,
     pub used_bytes: u64,
     pub usage_percent: f64,
+    pub purgeable_bytes: Option<u64>,
+    pub snapshot_bytes: u64,
 }

@@ -26,15 +26,47 @@ impl CleanupRule for TimeMachineSnapshotsRule {
             return Vec::new();
         }
 
+        let size = parse_snapshot_sizes();
+
         vec![ScannedEntry {
             path: std::path::PathBuf::from("/Time Machine Snapshots"),
-            size: 0,
+            size,
             category: Category::MacosSpecific,
             safety: SafetyLevel::Caution,
             description: format!("{snapshot_count} local Time Machine snapshot(s)"),
             item_count: Some(snapshot_count),
         }]
     }
+}
+
+/// Parse total snapshot size from `diskutil apfs list` output.
+fn parse_snapshot_sizes() -> u64 {
+    let Some(result) = cli_cache::get("diskutil_apfs_list") else {
+        return 0;
+    };
+
+    let mut total = 0u64;
+    let lines: Vec<&str> = result.stdout.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains("Snapshot Name:") && line.contains("com.apple.TimeMachine") {
+            for following in &lines[i + 1..] {
+                if following.contains("Snapshot Disk Size:") {
+                    if let Some(start) = following.find('(') {
+                        if let Some(end) = following[start..].find(" Bytes)") {
+                            if let Ok(bytes) = following[start + 1..start + end].trim().parse::<u64>() {
+                                total += bytes;
+                            }
+                        }
+                    }
+                    break;
+                }
+                if following.contains("Snapshot Name:") {
+                    break;
+                }
+            }
+        }
+    }
+    total
 }
 
 pub struct XcodeSimulatorsRule;
