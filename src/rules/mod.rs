@@ -34,6 +34,7 @@ pub struct ScanProgress {
     pub rules_total: AtomicUsize,
     pub bytes_found: AtomicU64,
     pub items_found: AtomicUsize,
+    pub current_rule: std::sync::Mutex<String>,
 }
 
 impl ScanProgress {
@@ -43,6 +44,7 @@ impl ScanProgress {
             rules_total: AtomicUsize::new(0),
             bytes_found: AtomicU64::new(0),
             items_found: AtomicUsize::new(0),
+            current_rule: std::sync::Mutex::new(String::new()),
         }
     }
 }
@@ -76,6 +78,21 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules
 });
 
+/// Eagerly initialize all `LazyLock` caches on dedicated OS threads
+/// BEFORE dispatching rules to the rayon pool. This prevents rayon thread
+/// starvation where all pool threads block on a `LazyLock` while the one thread
+/// doing the initialization can't get pool workers for its own `par_iter()`.
+fn warm_caches() {
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let _ = &*crate::scanner::cli_cache::CLI_CACHE;
+        });
+        s.spawn(|| {
+            let _ = &*crate::scanner::project_index::PROJECT_INDEX;
+        });
+    });
+}
+
 pub struct RuleEngine;
 
 #[allow(clippy::unused_self)]
@@ -86,6 +103,8 @@ impl RuleEngine {
 
     pub fn scan_all(&self, config: &Config, progress: Option<&ScanProgress>) -> ScanResult {
         use rayon::prelude::*;
+
+        warm_caches();
 
         let filtered_rules: Vec<_> = RULES
             .iter()
@@ -99,6 +118,11 @@ impl RuleEngine {
         let entries: Vec<ScannedEntry> = filtered_rules
             .par_iter()
             .flat_map(|rule| {
+                if let Some(p) = progress {
+                    if let Ok(mut name) = p.current_rule.lock() {
+                        *name = rule.name().to_string();
+                    }
+                }
                 let found = rule.scan(config);
                 if let Some(p) = progress {
                     let rule_bytes: u64 = found.iter().map(|e| e.size).sum();
@@ -121,6 +145,8 @@ impl RuleEngine {
 
     pub fn scan_all_streaming(&self, config: &Config, tx: &mpsc::Sender<ScanUpdate>) {
         use rayon::prelude::*;
+
+        warm_caches();
 
         let filtered_rules: Vec<_> = RULES
             .iter()
@@ -150,6 +176,8 @@ impl RuleEngine {
     ) -> ScanResult {
         use rayon::prelude::*;
 
+        warm_caches();
+
         let filtered_rules: Vec<_> = RULES
             .iter()
             .filter(|rule| rule.category() == category)
@@ -162,6 +190,11 @@ impl RuleEngine {
         let entries: Vec<ScannedEntry> = filtered_rules
             .par_iter()
             .flat_map(|rule| {
+                if let Some(p) = progress {
+                    if let Ok(mut name) = p.current_rule.lock() {
+                        *name = rule.name().to_string();
+                    }
+                }
                 let found = rule.scan(config);
                 if let Some(p) = progress {
                     let rule_bytes: u64 = found.iter().map(|e| e.size).sum();

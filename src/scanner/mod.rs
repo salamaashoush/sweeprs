@@ -77,8 +77,13 @@ pub fn scan_all_with_progress(config: &Config) -> Result<ScanResult> {
             let items = progress_clone.items_found.load(Ordering::Relaxed);
 
             if total > 0 {
+                let current = progress_clone
+                    .current_rule
+                    .lock()
+                    .map(|n| n.clone())
+                    .unwrap_or_default();
                 spinner_clone.set_message(format!(
-                    "Scanning... {done}/{total} rules | {items} items | {}",
+                    "Scanning... {done}/{total} rules | {items} items | {} | {current}",
                     util::human_size(bytes),
                 ));
             }
@@ -138,8 +143,13 @@ pub fn scan_category_with_progress(config: &Config, category: Category) -> Resul
             let items = progress_clone.items_found.load(Ordering::Relaxed);
 
             if total > 0 {
+                let current = progress_clone
+                    .current_rule
+                    .lock()
+                    .map(|n| n.clone())
+                    .unwrap_or_default();
                 spinner_clone.set_message(format!(
-                    "Scanning... {done}/{total} rules | {items} items | {}",
+                    "Scanning... {done}/{total} rules | {items} items | {} | {current}",
                     util::human_size(bytes),
                 ));
             }
