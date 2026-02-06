@@ -1,0 +1,272 @@
+use std::sync::mpsc;
+use std::thread;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::config::Config;
+use crate::rules::{brew, docker};
+use crate::scanner;
+use crate::scanner::ScanUpdate;
+use crate::scanner::entry::{ScanResult, ScannedEntry};
+use crate::tui::tree::{RowRef, Tree};
+use crate::tui::views::View;
+
+pub struct App {
+    pub running: bool,
+    pub view: View,
+    pub result: ScanResult,
+    pub scanning: bool,
+    pub tree: Tree,
+    pub cursor: usize,
+    pub scroll_offset: usize,
+    pub selected_for_deletion: Vec<ScannedEntry>,
+    pub config: Config,
+    pub scan_receiver: Option<mpsc::Receiver<ScanUpdate>>,
+    pub scan_rules_done: usize,
+    pub scan_rules_total: usize,
+    pub last_rule_name: String,
+}
+
+impl App {
+    pub fn new(config: Config) -> Self {
+        Self {
+            running: true,
+            view: View::Main,
+            result: ScanResult::default(),
+            scanning: false,
+            tree: Tree::from_scan_result(&ScanResult::default()),
+            cursor: 0,
+            scroll_offset: 0,
+            selected_for_deletion: Vec::new(),
+            config,
+            scan_receiver: None,
+            scan_rules_done: 0,
+            scan_rules_total: 0,
+            last_rule_name: String::new(),
+        }
+    }
+
+    pub fn start_scan(&mut self) {
+        if self.scanning {
+            return;
+        }
+        self.scanning = true;
+        self.result = ScanResult::default();
+        self.scan_rules_done = 0;
+        self.scan_rules_total = 0;
+        self.last_rule_name.clear();
+
+        let (tx, rx) = mpsc::channel();
+        self.scan_receiver = Some(rx);
+        let config = self.config.clone();
+
+        thread::spawn(move || {
+            scanner::scan_all_streaming(&config, &tx);
+        });
+    }
+
+    pub fn check_scan(&mut self) {
+        let Some(ref rx) = self.scan_receiver else {
+            return;
+        };
+
+        let mut finished = false;
+        let mut got_updates = false;
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                ScanUpdate::Started { rules_total } => {
+                    self.scan_rules_total = rules_total;
+                }
+                ScanUpdate::RuleComplete { rule_name, entries } => {
+                    let rule_bytes: u64 = entries.iter().map(|e| e.size).sum();
+                    self.result.total_size += rule_bytes;
+                    self.result.entries.extend(entries);
+                    self.scan_rules_done += 1;
+                    self.last_rule_name = rule_name.to_string();
+                    got_updates = true;
+                }
+                ScanUpdate::Finished {
+                    duration_secs,
+                    disk_info,
+                } => {
+                    self.result.scan_duration_secs = Some(duration_secs);
+                    self.result.disk_info = disk_info;
+                    finished = true;
+                }
+            }
+        }
+
+        if finished {
+            self.scanning = false;
+            self.scan_receiver = None;
+        }
+
+        if got_updates || finished {
+            self.rebuild_tree();
+        }
+    }
+
+    fn rebuild_tree(&mut self) {
+        self.tree = Tree::from_scan_result(&self.result);
+        let visible_count = self.tree.visible_rows().len();
+        if visible_count == 0 {
+            self.cursor = 0;
+        } else if self.cursor >= visible_count {
+            self.cursor = visible_count - 1;
+        }
+        self.clamp_scroll();
+    }
+
+    fn clamp_scroll(&mut self) {
+        if self.cursor < self.scroll_offset {
+            self.scroll_offset = self.cursor;
+        }
+        // scroll_offset upper bound is handled during rendering when we know viewport height
+    }
+
+    pub fn clamp_scroll_to_viewport(&mut self, viewport_height: usize) {
+        if viewport_height == 0 {
+            return;
+        }
+        if self.cursor >= self.scroll_offset + viewport_height {
+            self.scroll_offset = self.cursor - viewport_height + 1;
+        }
+        if self.cursor < self.scroll_offset {
+            self.scroll_offset = self.cursor;
+        }
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            self.running = false;
+            return;
+        }
+
+        match self.view {
+            View::Main => self.handle_main_key(key),
+            View::Confirm => self.handle_confirm_key(key),
+        }
+    }
+
+    fn handle_main_key(&mut self, key: KeyEvent) {
+        let visible = self.tree.visible_rows();
+        let max = visible.len();
+
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => self.running = false,
+            KeyCode::Char('j') | KeyCode::Down => {
+                if max > 0 && self.cursor < max - 1 {
+                    self.cursor += 1;
+                    self.clamp_scroll();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if self.cursor > 0 {
+                    self.cursor -= 1;
+                    self.clamp_scroll();
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
+                if let Some(&row) = visible.get(self.cursor) {
+                    if self.tree.is_expanded(row) {
+                        // Already expanded: move to first child
+                        if self.cursor + 1 < max {
+                            self.cursor += 1;
+                            self.clamp_scroll();
+                        }
+                    } else {
+                        self.tree.expand(row);
+                    }
+                }
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if let Some(&row) = visible.get(self.cursor) {
+                    match row {
+                        RowRef::Entry(..) | RowRef::Group(..) => {
+                            if matches!(row, RowRef::Group(..)) && self.tree.is_expanded(row) {
+                                self.tree.collapse(row);
+                            } else if let Some(parent) = Tree::parent(row) {
+                                // Jump to parent
+                                let new_visible = self.tree.visible_rows();
+                                if let Some(pos) =
+                                    new_visible.iter().position(|r| *r == parent)
+                                {
+                                    self.cursor = pos;
+                                    self.clamp_scroll();
+                                }
+                            }
+                        }
+                        RowRef::Category(_) => {
+                            if self.tree.is_expanded(row) {
+                                self.tree.collapse(row);
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(' ') => {
+                if let Some(&row) = visible.get(self.cursor) {
+                    self.tree.toggle(row);
+                }
+            }
+            KeyCode::Char('d') => {
+                let selected = self.tree.selected_entries();
+                if !selected.is_empty() {
+                    self.selected_for_deletion = selected;
+                    self.view = View::Confirm;
+                }
+            }
+            KeyCode::Char('r') => {
+                self.start_scan();
+            }
+            KeyCode::Char('g') => {
+                self.cursor = 0;
+                self.scroll_offset = 0;
+            }
+            KeyCode::Char('G') => {
+                if max > 0 {
+                    self.cursor = max - 1;
+                    self.clamp_scroll();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_confirm_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('y') => {
+                self.execute_deletion();
+                self.view = View::Main;
+                self.start_scan();
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.view = View::Main;
+            }
+            _ => {}
+        }
+    }
+
+    fn execute_deletion(&mut self) {
+        for entry in &self.selected_for_deletion {
+            let path_str = entry.path.display().to_string();
+
+            if path_str.starts_with("docker:") {
+                let _ = docker::clean_docker_entry(&path_str);
+                continue;
+            }
+            if path_str.starts_with("brew:") {
+                let _ = brew::clean_brew_entry(&path_str);
+                continue;
+            }
+
+            let path = &entry.path;
+            if path.is_dir() {
+                let _ = std::fs::remove_dir_all(path);
+            } else if path.is_file() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        self.selected_for_deletion.clear();
+    }
+}
