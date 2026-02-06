@@ -29,6 +29,8 @@ chrono = { version = "0.4", features = ["clock"] }
 sysinfo = "0.36"
 ctrlc = { version = "3", features = ["termination"] }
 globset = "0.4"
+clap_complete = "4"
+tempfile = "3"
 
 [lints.rust]
 unsafe_code = "deny"

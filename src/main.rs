@@ -1,4 +1,5 @@
 mod cleaner;
+mod commands;
 mod config;
 mod filter;
 mod monitor;
@@ -40,6 +41,12 @@ enum Command {
         /// Only show entries at least this large (e.g. 1G, 500M, 100K)
         #[arg(long)]
         min_size: Option<String>,
+        /// Save scan results to a JSON file
+        #[arg(long)]
+        save: Option<String>,
+        /// Load scan results from a JSON file instead of scanning
+        #[arg(long)]
+        load: Option<String>,
     },
     /// Clean up disk space
     Clean {
@@ -85,6 +92,17 @@ enum Command {
         /// Show current config path
         #[arg(long)]
         path: bool,
+    },
+    /// Update sweeprs to the latest version
+    Upgrade,
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for (auto-detected if omitted)
+        #[arg(value_enum)]
+        shell: Option<clap_complete::Shell>,
+        /// Install completions to shell config file
+        #[arg(long)]
+        install: bool,
     },
 }
 
@@ -210,9 +228,12 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => tui::run()?,
-        Some(Command::Scan { json, category, filters, exclude, min_size }) => {
+        Some(Command::Scan { json, category, filters, exclude, min_size, save, load }) => {
             let config = config::Config::load()?;
-            let mut result = if json {
+            let mut result = if let Some(ref load_path) = load {
+                let data = std::fs::read_to_string(load_path)?;
+                serde_json::from_str(&data)?
+            } else if json {
                 if let Some(cat) = category {
                     scanner::scan_category(&config, cat.to_category())?
                 } else {
@@ -225,6 +246,12 @@ fn main() -> Result<()> {
             };
 
             apply_filter(&mut result, &filters, &exclude, min_size)?;
+
+            if let Some(ref save_path) = save {
+                let json_data = serde_json::to_string_pretty(&result)?;
+                std::fs::write(save_path, json_data)?;
+                eprintln!("Scan results saved to: {save_path}");
+            }
 
             if json {
                 output::print_json(&result)?;
@@ -281,6 +308,10 @@ fn main() -> Result<()> {
                     println!("No config file. Run `sweeprs config --init` to create one.");
                 }
             }
+        }
+        Some(Command::Upgrade) => commands::upgrade::execute()?,
+        Some(Command::Completions { shell, install }) => {
+            commands::completions::execute(shell, install)?;
         }
     }
 
