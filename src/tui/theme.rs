@@ -14,6 +14,4 @@ pub const SAFE_COLOR: Color = GREEN;
 pub const CAUTION_COLOR: Color = YELLOW;
 pub const DANGER_COLOR: Color = RED;
 
-pub const GAUGE_LOW: Color = GREEN;
-pub const GAUGE_MED: Color = YELLOW;
-pub const GAUGE_HIGH: Color = RED;
+pub const BAR_FILL: Color = Color::Rgb(86, 95, 137);

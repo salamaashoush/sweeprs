@@ -10,6 +10,8 @@ use crate::tui::theme;
 use crate::tui::tree::{CheckState, RowRef};
 use crate::util;
 
+const BAR_WIDTH: usize = 10;
+
 pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -32,6 +34,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
+    let total_reclaimable = app.tree.total_reclaimable();
+
     let end = (app.scroll_offset + viewport_height).min(visible.len());
     let window = &visible[app.scroll_offset..end];
 
@@ -44,7 +48,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
 
             match *row {
                 RowRef::Category(ci) => {
-                    render_category_row(&app.tree, ci, is_cursor)
+                    render_category_row(&app.tree, ci, is_cursor, total_reclaimable)
                 }
                 RowRef::Group(ci, gi) => {
                     render_group_row(&app.tree, ci, gi, is_cursor)
@@ -60,7 +64,28 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(paragraph, inner);
 }
 
-fn render_category_row(tree: &crate::tui::tree::Tree, ci: usize, is_cursor: bool) -> Line<'static> {
+fn size_bar(size: u64, max_size: u64, width: usize, fill_color: ratatui::style::Color) -> Span<'static> {
+    if max_size == 0 {
+        return Span::styled(
+            "\u{2591}".repeat(width),
+            Style::default().fg(theme::BAR_FILL),
+        );
+    }
+
+    let ratio = size as f64 / max_size as f64;
+    let filled = (ratio * width as f64).round() as usize;
+    let empty = width.saturating_sub(filled);
+
+    let mut bar = "\u{2588}".repeat(filled);
+    bar.push_str(&"\u{2591}".repeat(empty));
+
+    Span::styled(
+        bar,
+        Style::default().fg(fill_color),
+    )
+}
+
+fn render_category_row(tree: &crate::tui::tree::Tree, ci: usize, is_cursor: bool, total_reclaimable: u64) -> Line<'static> {
     let cat = &tree.categories[ci];
     let arrow = if cat.expanded { "v" } else { ">" };
     let check = match tree.category_check_state(ci) {
@@ -85,9 +110,10 @@ fn render_category_row(tree: &crate::tui::tree::Tree, ci: usize, is_cursor: bool
     let count_str = format!("  ({} items)", cat.entry_count);
     spans.push(Span::styled(count_str, Style::default().fg(theme::DIM)));
     spans.push(Span::styled(
-        format!("  {size_str}"),
+        format!("  {size_str}  "),
         Style::default().fg(safety_color).bold(),
     ));
+    spans.push(size_bar(cat.total_size, total_reclaimable, BAR_WIDTH, safety_color));
 
     let style = if is_cursor {
         Style::default().bg(theme::SURFACE)
@@ -99,7 +125,8 @@ fn render_category_row(tree: &crate::tui::tree::Tree, ci: usize, is_cursor: bool
 }
 
 fn render_group_row(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, is_cursor: bool) -> Line<'static> {
-    let group = &tree.categories[ci].groups[gi];
+    let cat = &tree.categories[ci];
+    let group = &cat.groups[gi];
     let arrow = if group.expanded { "v" } else { ">" };
     let check = match tree.group_check_state(ci, gi) {
         CheckState::Checked => "[x]",
@@ -123,9 +150,10 @@ fn render_group_row(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, is_curs
     let size_str = util::human_size(group.total_size);
     spans.push(Span::styled(count_str, Style::default().fg(theme::DIM)));
     spans.push(Span::styled(
-        format!("  {size_str}"),
+        format!("  {size_str}  "),
         Style::default().fg(safety_color).bold(),
     ));
+    spans.push(size_bar(group.total_size, cat.total_size, BAR_WIDTH, safety_color));
 
     let style = if is_cursor {
         Style::default().bg(theme::SURFACE)
@@ -137,7 +165,8 @@ fn render_group_row(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, is_curs
 }
 
 fn render_entry_row(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, ei: usize, is_cursor: bool) -> Line<'static> {
-    let entry = &tree.categories[ci].groups[gi].entries[ei];
+    let group = &tree.categories[ci].groups[gi];
+    let entry = &group.entries[ei];
     let check = if entry.checked { "[x]" } else { "[ ]" };
     let safety_color = safety_to_color(entry.safety);
 
@@ -155,9 +184,10 @@ fn render_entry_row(tree: &crate::tui::tree::Tree, ci: usize, gi: usize, ei: usi
             Style::default().fg(theme::FG),
         ),
         Span::styled(
-            format!("  {size_str}"),
+            format!("  {size_str}  "),
             Style::default().fg(safety_color),
         ),
+        size_bar(entry.size, group.total_size, BAR_WIDTH, safety_color),
     ];
 
     let style = if is_cursor {

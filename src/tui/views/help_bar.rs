@@ -18,6 +18,8 @@ pub fn render(f: &mut Frame, area: Rect) {
         Span::styled(" delete  ", Style::default().fg(theme::DIM)),
         Span::styled("r", Style::default().fg(theme::ACCENT)),
         Span::styled(" rescan  ", Style::default().fg(theme::DIM)),
+        Span::styled("o", Style::default().fg(theme::ACCENT)),
+        Span::styled(" reveal  ", Style::default().fg(theme::DIM)),
         Span::styled("g/G", Style::default().fg(theme::ACCENT)),
         Span::styled(" top/bottom  ", Style::default().fg(theme::DIM)),
         Span::styled("q", Style::default().fg(theme::ACCENT)),

@@ -52,7 +52,7 @@ pub fn run() -> Result<()> {
 
             // Disk bar / scanning progress
             if let Some(ref disk_info) = app.result.disk_info {
-                DiskBar::new(disk_info).render(chunks[0], f.buffer_mut());
+                DiskBar::new(disk_info, app.tree.total_reclaimable()).render(chunks[0], f.buffer_mut());
             } else if app.scanning {
                 let scanning_text = format!(
                     " Scanning... {}/{} rules | {}",

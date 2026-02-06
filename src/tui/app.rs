@@ -229,6 +229,19 @@ impl App {
                     self.clamp_scroll();
                 }
             }
+            KeyCode::Char('o') => {
+                if let Some(&RowRef::Entry(ci, gi, ei)) = visible.get(self.cursor) {
+                    let path_str = self.tree.categories[ci].groups[gi].entries[ei]
+                        .path
+                        .display()
+                        .to_string();
+                    if !path_str.starts_with("docker:") && !path_str.starts_with("brew:") {
+                        let _ = std::process::Command::new("open")
+                            .args(["-R", &path_str])
+                            .spawn();
+                    }
+                }
+            }
             _ => {}
         }
     }
