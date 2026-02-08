@@ -85,8 +85,17 @@ pub fn run() -> Result<()> {
             // Status bar
             views::status_bar::render(f, chunks[2], &app);
 
-            // Help bar
-            views::help_bar::render(f, chunks[3]);
+            // Help bar / search bar
+            if app.view == View::Search {
+                let search_text = format!(" /{}", app.search_query);
+                let search_bar = ratatui::widgets::Paragraph::new(search_text)
+                    .style(Style::default().fg(theme::ACCENT));
+                f.render_widget(search_bar, chunks[3]);
+            } else if app.search_active && !app.search_query.is_empty() {
+                views::help_bar::render_with_filter(f, chunks[3], &app.search_query);
+            } else {
+                views::help_bar::render(f, chunks[3]);
+            }
 
             // Confirm overlay
             if app.view == View::Confirm {

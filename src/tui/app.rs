@@ -25,6 +25,8 @@ pub struct App {
     pub scan_rules_done: usize,
     pub scan_rules_total: usize,
     pub last_rule_name: String,
+    pub search_query: String,
+    pub search_active: bool,
 }
 
 impl App {
@@ -43,6 +45,8 @@ impl App {
             scan_rules_done: 0,
             scan_rules_total: 0,
             last_rule_name: String::new(),
+            search_query: String::new(),
+            search_active: false,
         }
     }
 
@@ -107,7 +111,28 @@ impl App {
     }
 
     fn rebuild_tree(&mut self) {
-        self.tree = Tree::from_scan_result(&self.result);
+        if self.search_active && !self.search_query.is_empty() {
+            let query = self.search_query.to_lowercase();
+            let filtered = ScanResult {
+                entries: self
+                    .result
+                    .entries
+                    .iter()
+                    .filter(|e| {
+                        let path_str = e.path.display().to_string().to_lowercase();
+                        let desc = e.description.to_lowercase();
+                        path_str.contains(&query) || desc.contains(&query)
+                    })
+                    .cloned()
+                    .collect(),
+                total_size: self.result.total_size,
+                disk_info: self.result.disk_info.clone(),
+                scan_duration_secs: self.result.scan_duration_secs,
+            };
+            self.tree = Tree::from_scan_result(&filtered);
+        } else {
+            self.tree = Tree::from_scan_result(&self.result);
+        }
         let visible_count = self.tree.visible_rows().len();
         if visible_count == 0 {
             self.cursor = 0;
@@ -145,15 +170,27 @@ impl App {
         match self.view {
             View::Main => self.handle_main_key(key),
             View::Confirm => self.handle_confirm_key(key),
+            View::Search => self.handle_search_key(key),
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_main_key(&mut self, key: KeyEvent) {
         let visible = self.tree.visible_rows();
         let max = visible.len();
 
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.running = false,
+            KeyCode::Char('q') => self.running = false,
+            KeyCode::Esc => {
+                if self.search_active {
+                    // Clear search filter instead of quitting
+                    self.search_query.clear();
+                    self.search_active = false;
+                    self.rebuild_tree();
+                } else {
+                    self.running = false;
+                }
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 if max > 0 && self.cursor < max - 1 {
                     self.cursor += 1;
@@ -240,6 +277,30 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('y') => {
+                // Copy selected entry path to clipboard
+                if let Some(&RowRef::Entry(ci, gi, ei)) = visible.get(self.cursor) {
+                    let path_str = self.tree.categories[ci].groups[gi].entries[ei]
+                        .path
+                        .display()
+                        .to_string();
+                    let _ = std::process::Command::new("pbcopy")
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                        .and_then(|mut child| {
+                            if let Some(ref mut stdin) = child.stdin {
+                                use std::io::Write;
+                                stdin.write_all(path_str.as_bytes())?;
+                            }
+                            child.wait()
+                        });
+                }
+            }
+            KeyCode::Char('/') => {
+                self.view = View::Search;
+                self.search_query.clear();
+                self.search_active = true;
+            }
             _ => {}
         }
     }
@@ -253,6 +314,38 @@ impl App {
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 self.view = View::Main;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_search_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel search and clear filter
+                self.view = View::Main;
+                self.search_query.clear();
+                self.search_active = false;
+                self.rebuild_tree();
+            }
+            KeyCode::Enter => {
+                // Confirm search and return to main view (filter stays active)
+                self.view = View::Main;
+                if self.search_query.is_empty() {
+                    self.search_active = false;
+                }
+            }
+            KeyCode::Backspace => {
+                self.search_query.pop();
+                self.rebuild_tree();
+                self.cursor = 0;
+                self.scroll_offset = 0;
+            }
+            KeyCode::Char(c) => {
+                self.search_query.push(c);
+                self.rebuild_tree();
+                self.cursor = 0;
+                self.scroll_offset = 0;
             }
             _ => {}
         }

@@ -8,4 +8,5 @@ pub mod tree_panel;
 pub enum View {
     Main,
     Confirm,
+    Search,
 }
