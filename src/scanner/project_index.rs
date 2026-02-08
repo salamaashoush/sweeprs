@@ -32,6 +32,7 @@ const SKIP_DIRS: &[&str] = &[
     "_build",
     ".dart_tool",
     ".git",
+    "__pycache__",
 ];
 
 pub struct ProjectIndex {
@@ -101,6 +102,15 @@ impl ProjectIndex {
             }
         }
         found
+    }
+
+    /// Find all directories with a given name.
+    pub fn find_dirs_by_name(&self, name: &str) -> Vec<PathBuf> {
+        self.dirs
+            .iter()
+            .filter(|d| d.name == name)
+            .map(|d| d.path.clone())
+            .collect()
     }
 
     /// Return all discovered git project roots.

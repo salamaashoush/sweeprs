@@ -77,6 +77,33 @@ impl CleanupRule for SystemTempRule {
             }
         }
 
+        // Scan /private/tmp (aka /tmp) for system-wide temp files
+        let private_tmp = PathBuf::from("/private/tmp");
+        if private_tmp.exists() && private_tmp.is_dir() {
+            // Canonicalize to avoid double-counting if TMPDIR somehow points here
+            let private_tmp_canonical = private_tmp
+                .canonicalize()
+                .unwrap_or_else(|_| private_tmp.clone());
+            let already_scanned = std::env::var("TMPDIR")
+                .ok()
+                .and_then(|t| PathBuf::from(&t).canonicalize().ok())
+                .is_some_and(|c| c == private_tmp_canonical);
+
+            if !already_scanned && std::fs::read_dir(&private_tmp).is_ok() {
+                let size = scan_old_files(&private_tmp, one_hour_ago);
+                if size > 0 {
+                    entries.push(ScannedEntry {
+                        path: private_tmp,
+                        size,
+                        category: Category::SystemJunk,
+                        safety: SafetyLevel::Caution,
+                        description: "System temp files (/private/tmp)".to_owned(),
+                        item_count: None,
+                    });
+                }
+            }
+        }
+
         // Also scan /private/var/folders for user-owned temp dirs
         let var_folders = PathBuf::from("/private/var/folders");
         if var_folders.exists() {

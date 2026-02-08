@@ -1,17 +1,23 @@
+pub mod android;
 pub mod app_cache;
 pub mod brew;
 pub mod browser;
 pub mod build;
 pub mod cache;
+pub mod cloud_cache;
+pub mod conda;
+pub mod containers;
 pub mod docker;
 pub mod downloads;
 pub mod duplicates;
 pub mod gitignored;
 pub mod ide;
 pub mod large_files;
+pub mod llm;
 pub mod logs;
 pub mod macos;
 pub mod mobile;
+pub mod pycache;
 pub mod system;
 pub mod toolchain;
 pub mod trash;
@@ -83,6 +89,12 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(app_cache::rules());
     rules.extend(system::rules());
     rules.extend(mobile::rules());
+    rules.extend(conda::rules());
+    rules.extend(android::rules());
+    rules.extend(pycache::rules());
+    rules.extend(containers::rules());
+    rules.extend(cloud_cache::rules());
+    rules.extend(llm::rules());
     rules
 });
 

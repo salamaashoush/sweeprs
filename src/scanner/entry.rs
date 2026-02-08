@@ -22,6 +22,7 @@ pub enum Category {
     AppCache,
     SystemJunk,
     MobileBackup,
+    LlmModels,
 }
 
 impl Category {
@@ -43,6 +44,7 @@ impl Category {
         Self::AppCache,
         Self::SystemJunk,
         Self::MobileBackup,
+        Self::LlmModels,
     ];
 
     pub fn default_safety(self) -> SafetyLevel {
@@ -59,7 +61,8 @@ impl Category {
             | Self::OldDownload
             | Self::MacosSpecific
             | Self::SystemJunk
-            | Self::MobileBackup => SafetyLevel::Caution,
+            | Self::MobileBackup
+            | Self::LlmModels => SafetyLevel::Caution,
             Self::Trash | Self::LargeFile | Self::Duplicate => SafetyLevel::Danger,
         }
     }
@@ -84,6 +87,7 @@ impl fmt::Display for Category {
             Self::AppCache => write!(f, "App Caches"),
             Self::SystemJunk => write!(f, "System Junk"),
             Self::MobileBackup => write!(f, "Mobile Backups"),
+            Self::LlmModels => write!(f, "LLM Models"),
         }
     }
 }

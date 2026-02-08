@@ -123,6 +123,39 @@ cache_rule!(
     "Library/Caches/deno"
 );
 
+cache_rule!(
+    NeovimCacheRule,
+    "Neovim cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cache/nvim",
+    ".local/share/nvim"
+);
+
+cache_rule!(
+    BundlerCacheRule,
+    "Bundler cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".bundle/cache"
+);
+
+cache_rule!(
+    MavenWrapperRule,
+    "Maven wrapper distributions",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".m2/wrapper/dists"
+);
+
+cache_rule!(
+    GoDownloadCacheRule,
+    "Go download cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "go/pkg/mod/download"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(NpmCacheRule),
@@ -140,5 +173,9 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(GemCacheRule),
         Box::new(PoetryCacheRule),
         Box::new(DenoCacheRule),
+        Box::new(NeovimCacheRule),
+        Box::new(BundlerCacheRule),
+        Box::new(MavenWrapperRule),
+        Box::new(GoDownloadCacheRule),
     ]
 }

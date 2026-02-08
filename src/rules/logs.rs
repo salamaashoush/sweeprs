@@ -57,6 +57,57 @@ impl CleanupRule for LogFilesRule {
     }
 }
 
+/// Scan system-level logs in /var/log and /Library/Logs that accumulate over time.
+pub struct SystemLogsRule;
+
+impl CleanupRule for SystemLogsRule {
+    fn name(&self) -> &'static str {
+        "System logs"
+    }
+
+    fn category(&self) -> Category {
+        Category::LogFile
+    }
+
+    fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
+        let mut entries = Vec::new();
+
+        // /var/log - system logs (requires read permission)
+        let var_log = std::path::PathBuf::from("/var/log");
+        if var_log.exists() && std::fs::read_dir(&var_log).is_ok() {
+            let (size, count) = walker::dir_size_and_count(&var_log);
+            if size > 0 {
+                entries.push(ScannedEntry {
+                    path: var_log,
+                    size,
+                    category: Category::LogFile,
+                    safety: SafetyLevel::Caution,
+                    description: "System logs (/var/log)".to_owned(),
+                    item_count: Some(count),
+                });
+            }
+        }
+
+        // /Library/Logs - system-wide application logs
+        let lib_logs = std::path::PathBuf::from("/Library/Logs");
+        if lib_logs.exists() && std::fs::read_dir(&lib_logs).is_ok() {
+            let (size, count) = walker::dir_size_and_count(&lib_logs);
+            if size > 0 {
+                entries.push(ScannedEntry {
+                    path: lib_logs,
+                    size,
+                    category: Category::LogFile,
+                    safety: SafetyLevel::Caution,
+                    description: "System application logs (/Library/Logs)".to_owned(),
+                    item_count: Some(count),
+                });
+            }
+        }
+
+        entries
+    }
+}
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
-    vec![Box::new(LogFilesRule)]
+    vec![Box::new(LogFilesRule), Box::new(SystemLogsRule)]
 }

@@ -15,28 +15,49 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralConfig {
+    #[serde(alias = "confirmBeforeDelete")]
     pub confirm_before_delete: bool,
+    #[serde(alias = "cliDryRunDefault")]
     pub cli_dry_run_default: bool,
+    #[serde(alias = "outputFormat")]
     pub output_format: String,
+    #[serde(alias = "globalExcludes")]
     pub global_excludes: Vec<String>,
+    /// Default categories for `sweeprs clean` when no category is specified.
+    /// If empty, all enabled categories are used (original behavior).
+    /// Example: `["cache", "build", "browser", "ide", "app-cache"]`
+    #[serde(alias = "defaultCleanCategories")]
+    pub default_clean_categories: Vec<String>,
+    /// Default safety level for `sweeprs clean` when --all is not passed.
+    /// "safe" = only Safe items, "caution" = Safe + Caution, "all" = everything.
+    #[serde(alias = "defaultCleanSafety")]
+    pub default_clean_safety: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScanConfig {
+    #[serde(alias = "maxDepth")]
     pub max_depth: usize,
     pub threads: usize,
+    #[serde(alias = "followSymlinks")]
     pub follow_symlinks: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CategoriesConfig {
+    #[serde(alias = "downloadAgeDays")]
     pub download_age_days: u64,
+    #[serde(alias = "largeFileThreshold")]
     pub large_file_threshold: u64,
+    #[serde(alias = "largeFileDirs")]
     pub large_file_dirs: Vec<String>,
+    #[serde(alias = "enableDuplicates")]
     pub enable_duplicates: bool,
+    #[serde(alias = "duplicateMinSize")]
     pub duplicate_min_size: u64,
+    #[serde(alias = "duplicateDirs")]
     pub duplicate_dirs: Vec<String>,
     pub enabled: EnabledCategories,
 }
@@ -45,29 +66,47 @@ pub struct CategoriesConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnabledCategories {
+    #[serde(alias = "packageCache")]
     pub package_cache: bool,
+    #[serde(alias = "buildArtifact")]
     pub build_artifact: bool,
+    #[serde(alias = "installedDeps")]
     pub installed_deps: bool,
+    #[serde(alias = "browserCache")]
     pub browser_cache: bool,
+    #[serde(alias = "ideCache")]
     pub ide_cache: bool,
+    #[serde(alias = "rustToolchain")]
     pub rust_toolchain: bool,
     pub docker: bool,
+    #[serde(alias = "logFile")]
     pub log_file: bool,
     pub trash: bool,
+    #[serde(alias = "oldDownload")]
     pub old_download: bool,
+    #[serde(alias = "largeFile")]
     pub large_file: bool,
     pub duplicate: bool,
+    #[serde(alias = "macosSpecific")]
     pub macos_specific: bool,
+    #[serde(alias = "appCache")]
     pub app_cache: bool,
+    #[serde(alias = "systemJunk")]
     pub system_junk: bool,
+    #[serde(alias = "mobileBackup")]
     pub mobile_backup: bool,
+    #[serde(alias = "llmModels")]
+    pub llm_models: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MonitorConfig {
+    #[serde(alias = "pollIntervalSecs")]
     pub poll_interval_secs: u64,
+    #[serde(alias = "warningThresholdPercent")]
     pub warning_threshold_percent: u8,
+    #[serde(alias = "criticalThresholdPercent")]
     pub critical_threshold_percent: u8,
 }
 
@@ -78,6 +117,8 @@ impl Default for GeneralConfig {
             cli_dry_run_default: true,
             output_format: "table".to_owned(),
             global_excludes: Vec::new(),
+            default_clean_categories: Vec::new(),
+            default_clean_safety: "safe".to_owned(),
         }
     }
 }
@@ -125,6 +166,7 @@ impl Default for EnabledCategories {
             app_cache: true,
             system_junk: true,
             mobile_backup: true,
+            llm_models: true,
         }
     }
 }
@@ -187,7 +229,47 @@ impl Config {
             Category::AppCache => self.categories.enabled.app_cache,
             Category::SystemJunk => self.categories.enabled.system_junk,
             Category::MobileBackup => self.categories.enabled.mobile_backup,
+            Category::LlmModels => self.categories.enabled.llm_models,
         }
+    }
+
+    /// Parse a category name string (as used in CLI args / config) into a `Category`.
+    pub fn parse_category(name: &str) -> Option<crate::scanner::entry::Category> {
+        use crate::scanner::entry::Category;
+        match name {
+            "cache" => Some(Category::PackageCache),
+            "build" => Some(Category::BuildArtifact),
+            "deps" => Some(Category::InstalledDeps),
+            "browser" => Some(Category::BrowserCache),
+            "ide" => Some(Category::IdeCache),
+            "toolchain" => Some(Category::RustToolchain),
+            "docker" => Some(Category::Docker),
+            "logs" => Some(Category::LogFile),
+            "trash" => Some(Category::Trash),
+            "downloads" => Some(Category::OldDownload),
+            "large-files" => Some(Category::LargeFile),
+            "duplicates" => Some(Category::Duplicate),
+            "macos" => Some(Category::MacosSpecific),
+            "app-cache" => Some(Category::AppCache),
+            "system-junk" => Some(Category::SystemJunk),
+            "mobile-backup" => Some(Category::MobileBackup),
+            "llm" | "llm-models" => Some(Category::LlmModels),
+            _ => None,
+        }
+    }
+
+    /// Get the default clean categories from config, or None if not configured (use all).
+    pub fn default_clean_categories(&self) -> Option<Vec<crate::scanner::entry::Category>> {
+        if self.general.default_clean_categories.is_empty() {
+            return None;
+        }
+        let cats: Vec<_> = self
+            .general
+            .default_clean_categories
+            .iter()
+            .filter_map(|s| Self::parse_category(s))
+            .collect();
+        if cats.is_empty() { None } else { Some(cats) }
     }
 
     pub fn expand_path(path: &str) -> PathBuf {

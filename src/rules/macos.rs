@@ -169,6 +169,14 @@ cache_rule!(
     "Library/Caches/com.apple.podcasts"
 );
 
+cache_rule!(
+    XcodePlaygroundRule,
+    "Xcode Playground data",
+    Category::MacosSpecific,
+    SafetyLevel::Safe,
+    "Library/Developer/XCPGDevices"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(TimeMachineSnapshotsRule),
@@ -177,5 +185,6 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(AppleMusicCacheRule),
         Box::new(PhotosFaceCacheRule),
         Box::new(PodcastCacheRule),
+        Box::new(XcodePlaygroundRule),
     ]
 }
