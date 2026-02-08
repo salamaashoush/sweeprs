@@ -41,15 +41,15 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
                 let free = util::human_size(info.available_bytes);
 
                 if pct >= critical_threshold && should_notify(last_critical_at.as_ref()) {
-                    let _ = notify::send_warning(
+                    send_and_handle(
                         "sweeprs: Disk Critical!",
                         &format!(
-                            "Disk usage at {pct:.1}%! {free} free. Run `sweeprs scan` to find reclaimable space.",
+                            "Disk usage at {pct:.1}%! {free} free.",
                         ),
                     );
                     last_critical_at = Some(Instant::now());
                 } else if pct >= warning_threshold && should_notify(last_warning_at.as_ref()) {
-                    let _ = notify::send_warning(
+                    send_and_handle(
                         "sweeprs: Disk Warning",
                         &format!("Disk usage at {pct:.1}%. {free} free."),
                     );
@@ -72,6 +72,47 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
             std::thread::sleep(TICK.min(deadline - Instant::now()));
         }
     }
+}
+
+/// Send a notification on a background thread. If the user clicks "Clean Now",
+/// open a new Terminal window running `sweeprs clean` (dry-run by default)
+/// so the user can review what would be deleted and confirm interactively.
+fn send_and_handle(title: &str, message: &str) {
+    let title = title.to_owned();
+    let message = message.to_owned();
+    std::thread::spawn(move || {
+        match notify::send_warning(&title, &message) {
+            Ok(true) => {
+                eprintln!("[sweeprs monitor] User clicked Clean Now, opening terminal...");
+                let exe = std::env::current_exe().map_or_else(
+                    |_| "sweeprs".to_owned(),
+                    |p| p.display().to_string(),
+                );
+                // Open a new Terminal.app window with `sweeprs clean` (dry-run, user confirms)
+                let script = format!(
+                    "tell application \"Terminal\"\n\
+                         activate\n\
+                         do script \"{exe} clean\"\n\
+                     end tell"
+                );
+                let result = std::process::Command::new("osascript")
+                    .args(["-e", &script])
+                    .status();
+                match result {
+                    Ok(status) => {
+                        eprintln!("[sweeprs monitor] Opened Terminal (exit: {status})");
+                    }
+                    Err(e) => {
+                        eprintln!("[sweeprs monitor] Failed to open Terminal: {e}");
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("[sweeprs monitor] Notification error: {e}");
+            }
+        }
+    });
 }
 
 fn should_notify(last: Option<&Instant>) -> bool {
