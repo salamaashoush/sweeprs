@@ -146,6 +146,8 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
     entries.par_iter().for_each(|entry| {
         let path_str = entry.path.display().to_string();
 
+        let is_synthetic = path_str.starts_with("docker:") || path_str.starts_with("brew:");
+
         let result = if path_str.starts_with("docker:") {
             docker::clean_docker_entry(&path_str)
         } else if path_str.starts_with("brew:") {
@@ -161,7 +163,22 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
 
         match result {
             Ok(()) => {
-                let total = cleaned.fetch_add(entry.size, Ordering::Relaxed) + entry.size;
+                // For synthetic paths (docker:/brew:) or fully removed entries,
+                // count the full size. For filesystem paths, verify removal.
+                let freed = if is_synthetic || !entry.path.exists() {
+                    entry.size
+                } else {
+                    // Partial deletion: measure what remains and subtract
+                    let remaining = if entry.path.is_dir() {
+                        crate::scanner::walker::dir_size(&entry.path)
+                    } else if entry.path.is_file() {
+                        entry.path.metadata().map(|m| m.len()).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    entry.size.saturating_sub(remaining)
+                };
+                let total = cleaned.fetch_add(freed, Ordering::Relaxed) + freed;
                 bar.set_message(format!(
                     "{} / {}",
                     util::human_size(total),
@@ -169,6 +186,18 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
                 ));
             }
             Err(e) => {
+                // Even on error, some bytes may have been freed (partial deletion)
+                if !is_synthetic && entry.path.exists() {
+                    let remaining = if entry.path.is_dir() {
+                        crate::scanner::walker::dir_size(&entry.path)
+                    } else {
+                        entry.path.metadata().map(|m| m.len()).unwrap_or(0)
+                    };
+                    let freed = entry.size.saturating_sub(remaining);
+                    if freed > 0 {
+                        cleaned.fetch_add(freed, Ordering::Relaxed);
+                    }
+                }
                 errors.lock().unwrap().push((entry.path.clone(), e));
             }
         }
