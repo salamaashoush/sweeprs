@@ -49,17 +49,23 @@ enum Command {
         load: Option<String>,
     },
     /// Clean up disk space
+    ///
+    /// Pass one or more categories to clean specific ones, or omit for defaults.
+    /// Examples:
+    ///   sweeprs clean --force              # clean default categories from config (or all if unset)
+    ///   sweeprs clean cache build --force   # clean only cache + build
+    ///   sweeprs clean llm --force --all     # clean LLM models including Caution items
     Clean {
-        /// Category to clean (defaults to "all")
-        #[arg(default_value = "all")]
-        target: CleanTarget,
+        /// Categories to clean (omit for config defaults, or "all" for everything)
+        #[arg(value_enum)]
+        targets: Vec<CleanTarget>,
         /// Actually delete (default is dry-run)
         #[arg(long)]
         force: bool,
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
-        /// Include Caution and Danger items (default: Safe only)
+        /// Include Caution and Danger items (default: Safe only, overridden by config)
         #[arg(short, long)]
         all: bool,
         /// Only clean entries matching this glob (repeatable)
@@ -83,6 +89,12 @@ enum Command {
         /// Run in foreground
         #[arg(long)]
         foreground: bool,
+        /// Install as launchd service (starts on login)
+        #[arg(long)]
+        install: bool,
+        /// Uninstall launchd service
+        #[arg(long)]
+        uninstall: bool,
     },
     /// Manage configuration
     Config {
@@ -93,6 +105,8 @@ enum Command {
         #[arg(long)]
         path: bool,
     },
+    /// List all scan categories
+    Categories,
     /// Update sweeprs to the latest version
     Upgrade,
     /// Generate shell completions
@@ -124,6 +138,7 @@ enum CategoryArg {
     AppCache,
     SystemJunk,
     MobileBackup,
+    Llm,
 }
 
 impl CategoryArg {
@@ -145,6 +160,7 @@ impl CategoryArg {
             Self::AppCache => Category::AppCache,
             Self::SystemJunk => Category::SystemJunk,
             Self::MobileBackup => Category::MobileBackup,
+            Self::Llm => Category::LlmModels,
         }
     }
 }
@@ -168,6 +184,7 @@ enum CleanTarget {
     AppCache,
     SystemJunk,
     MobileBackup,
+    Llm,
 }
 
 impl CleanTarget {
@@ -190,22 +207,30 @@ impl CleanTarget {
             Self::AppCache => Some(Category::AppCache),
             Self::SystemJunk => Some(Category::SystemJunk),
             Self::MobileBackup => Some(Category::MobileBackup),
+            Self::Llm => Some(Category::LlmModels),
         }
     }
 }
 
-/// Build an `EntryFilter` from CLI args and apply it to a `ScanResult` in place.
+/// Build an `EntryFilter` from CLI args (merged with config `global_excludes`) and apply it
+/// to a `ScanResult` in place.
 fn apply_filter(
     result: &mut scanner::entry::ScanResult,
     filters: &[String],
     exclude: &[String],
     min_size: Option<String>,
+    config: &config::Config,
 ) -> Result<()> {
     let min_bytes = min_size
         .map(|s| filter::parse_size(&s))
         .transpose()?
         .unwrap_or(0);
-    let entry_filter = filter::EntryFilter::new(filters, exclude, min_bytes)?;
+
+    // Merge CLI --exclude with config global_excludes
+    let mut all_excludes: Vec<String> = config.general.global_excludes.clone();
+    all_excludes.extend_from_slice(exclude);
+
+    let entry_filter = filter::EntryFilter::new(filters, &all_excludes, min_bytes)?;
     if entry_filter.is_active() {
         let kept: Vec<_> = entry_filter
             .apply(&result.entries)
@@ -261,7 +286,7 @@ fn main() -> Result<()> {
                 scanner::scan_all_with_progress(&config)?
             };
 
-            apply_filter(&mut result, &filters, &exclude, min_size)?;
+            apply_filter(&mut result, &filters, &exclude, min_size, &config)?;
 
             if let Some(ref save_path) = save {
                 let json_data = serde_json::to_string_pretty(&result)?;
@@ -277,7 +302,7 @@ fn main() -> Result<()> {
             }
         }
         Some(Command::Clean {
-            target,
+            targets,
             force,
             yes,
             all,
@@ -286,19 +311,51 @@ fn main() -> Result<()> {
             min_size,
         }) => {
             let config = config::Config::load()?;
-            let mut result = if let Some(category) = target.to_category() {
-                scanner::scan_category_with_progress(&config, category)?
+
+            // Resolve which categories to clean:
+            // 1. CLI args override everything
+            // 2. If no CLI args, use config default_clean_categories
+            // 3. If config is empty too, scan all
+            let categories: Option<Vec<Category>> = if targets.is_empty() {
+                // No CLI targets -> use config defaults
+                config.default_clean_categories()
+            } else if targets.iter().any(|t| matches!(t, CleanTarget::All)) {
+                // Explicit "all"
+                None
             } else {
-                scanner::scan_all_with_progress(&config)?
+                // Specific categories from CLI
+                let cats: Vec<Category> = targets
+                    .iter()
+                    .filter_map(CleanTarget::to_category)
+                    .collect();
+                if cats.is_empty() { None } else { Some(cats) }
             };
 
-            apply_filter(&mut result, &filters, &exclude, min_size)?;
+            let mut result = match categories {
+                None => scanner::scan_all_with_progress(&config)?,
+                Some(ref cats) if cats.len() == 1 => {
+                    scanner::scan_category_with_progress(&config, cats[0])?
+                }
+                Some(ref cats) => scanner::scan_categories_with_progress(&config, cats)?,
+            };
+
+            apply_filter(&mut result, &filters, &exclude, min_size, &config)?;
             print_scan_summary(&result);
+
+            // Resolve safety level: CLI --all overrides, then config default_clean_safety
+            let include_unsafe = if all {
+                true
+            } else {
+                matches!(
+                    config.general.default_clean_safety.as_str(),
+                    "caution" | "all"
+                )
+            };
 
             let options = cleaner::CleanOptions {
                 dry_run: !force,
                 skip_confirm: yes,
-                include_unsafe: all,
+                include_unsafe,
             };
             cleaner::clean(&result.entries, &options)?;
         }
@@ -306,8 +363,14 @@ fn main() -> Result<()> {
             stop,
             status,
             foreground,
+            install,
+            uninstall,
         }) => {
-            if stop {
+            if install {
+                monitor::install()?;
+            } else if uninstall {
+                monitor::uninstall()?;
+            } else if stop {
                 monitor::stop()?;
             } else if status {
                 monitor::status()?;
@@ -331,6 +394,32 @@ fn main() -> Result<()> {
                 } else {
                     println!("No config file. Run `sweeprs config --init` to create one.");
                 }
+            }
+        }
+        Some(Command::Categories) => {
+            println!("{:<20} {:<10} CLI ARG", "CATEGORY", "SAFETY");
+            println!("{}", "-".repeat(50));
+            for cat in Category::ALL {
+                let arg = match cat {
+                    Category::PackageCache => "cache",
+                    Category::BuildArtifact => "build",
+                    Category::InstalledDeps => "deps",
+                    Category::BrowserCache => "browser",
+                    Category::IdeCache => "ide",
+                    Category::RustToolchain => "toolchain",
+                    Category::Docker => "docker",
+                    Category::LogFile => "logs",
+                    Category::Trash => "trash",
+                    Category::OldDownload => "downloads",
+                    Category::LargeFile => "large-files",
+                    Category::Duplicate => "duplicates",
+                    Category::MacosSpecific => "macos",
+                    Category::AppCache => "app-cache",
+                    Category::SystemJunk => "system-junk",
+                    Category::MobileBackup => "mobile-backup",
+                    Category::LlmModels => "llm",
+                };
+                println!("{:<20} {:<10} {}", cat, cat.default_safety(), arg);
             }
         }
         Some(Command::Upgrade) => commands::upgrade::execute()?,

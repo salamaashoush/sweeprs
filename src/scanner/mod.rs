@@ -121,6 +121,73 @@ pub fn scan_all_streaming(config: &Config, tx: &mpsc::Sender<ScanUpdate>) {
     });
 }
 
+/// Scan multiple categories with a progress spinner.
+pub fn scan_categories_with_progress(
+    config: &Config,
+    categories: &[Category],
+) -> Result<ScanResult> {
+    configure_thread_pool(config);
+    let progress = Arc::new(ScanProgress::new());
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
+            .expect("valid template")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+    );
+    let cat_names: Vec<_> = categories
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
+    spinner.set_message(format!("Scanning {}...", cat_names.join(", ")));
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
+    let progress_clone = Arc::clone(&progress);
+    let spinner_clone = spinner.clone();
+    let tick_handle = thread::spawn(move || {
+        loop {
+            let done = progress_clone.rules_done.load(Ordering::Relaxed);
+            let total = progress_clone.rules_total.load(Ordering::Relaxed);
+            let bytes = progress_clone.bytes_found.load(Ordering::Relaxed);
+            let items = progress_clone.items_found.load(Ordering::Relaxed);
+
+            if total > 0 {
+                let current = progress_clone
+                    .current_rule
+                    .lock()
+                    .map(|n| n.clone())
+                    .unwrap_or_default();
+                spinner_clone.set_message(format!(
+                    "Scanning... {done}/{total} rules | {items} items | {} | {current}",
+                    util::human_size(bytes),
+                ));
+            }
+
+            if done > 0 && done >= total && total > 0 {
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(80));
+        }
+    });
+
+    let engine = RuleEngine::new(config);
+    let start = Instant::now();
+
+    // Scan each category and merge results
+    let mut combined = entry::ScanResult::default();
+    for cat in categories {
+        let partial = engine.scan_category(*cat, config, Some(&progress));
+        combined.entries.extend(partial.entries);
+        combined.total_size += partial.total_size;
+    }
+    combined.scan_duration_secs = Some(start.elapsed().as_secs_f64());
+
+    let _ = tick_handle.join();
+    spinner.finish_and_clear();
+
+    combined.disk_info = Some(platform::get_disk_info()?);
+    Ok(combined)
+}
+
 pub fn scan_category_with_progress(config: &Config, category: Category) -> Result<ScanResult> {
     configure_thread_pool(config);
     let progress = Arc::new(ScanProgress::new());
