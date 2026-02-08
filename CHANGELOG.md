@@ -1,6 +1,22 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.3.0] - 2026-02-08
+
+### Features
+
+- Add new scan rules for LLM models, conda, android, pycache, containers, and cloud CLIs
+- Multi-category clean, default clean categories, and categories command
+- TUI search/filter, copy path, and updated help bar
+- Monitor launchd service install and notification cleanup action
+
+### Bug Fixes
+
+- Accurate byte counting for partial deletions
+
+### Documentation
+
+- Comprehensive README update for v0.3.0 features
 ## [0.2.0] - 2026-02-06
 
 ### Features
