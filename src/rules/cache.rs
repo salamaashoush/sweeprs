@@ -148,14 +148,6 @@ cache_rule!(
     ".m2/wrapper/dists"
 );
 
-cache_rule!(
-    GoDownloadCacheRule,
-    "Go download cache",
-    Category::PackageCache,
-    SafetyLevel::Safe,
-    "go/pkg/mod/download"
-);
-
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(NpmCacheRule),
@@ -176,6 +168,5 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(NeovimCacheRule),
         Box::new(BundlerCacheRule),
         Box::new(MavenWrapperRule),
-        Box::new(GoDownloadCacheRule),
     ]
 }

@@ -18,7 +18,7 @@ impl CleanupRule for CondaEnvsRule {
     }
 
     fn category(&self) -> Category {
-        Category::RustToolchain
+        Category::Toolchain
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
@@ -75,7 +75,7 @@ impl CleanupRule for CondaEnvsRule {
                     entries.push(ScannedEntry {
                         path,
                         size,
-                        category: Category::RustToolchain,
+                        category: Category::Toolchain,
                         safety: SafetyLevel::Caution,
                         description: format!("Conda env: {name_str}"),
                         item_count: None,

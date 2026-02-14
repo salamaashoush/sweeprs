@@ -30,7 +30,8 @@ cache_rule!(
     "Azure CLI cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    ".azure"
+    ".azure/cliextensions",
+    ".azure/commands"
 );
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {

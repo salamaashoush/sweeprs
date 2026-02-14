@@ -105,6 +105,30 @@ cache_rule!(
     "Library/Caches/com.sublimetext.4"
 );
 
+cache_rule!(
+    XcodeProductsRule,
+    "Xcode Products",
+    Category::IdeCache,
+    SafetyLevel::Safe,
+    "Library/Developer/Xcode/Products"
+);
+
+cache_rule!(
+    XcodeIBSupportRule,
+    "Xcode IB Support",
+    Category::IdeCache,
+    SafetyLevel::Safe,
+    "Library/Developer/Xcode/UserData/IB Support"
+);
+
+cache_rule!(
+    XcodeDocIndexRule,
+    "Xcode DocumentationIndex",
+    Category::IdeCache,
+    SafetyLevel::Safe,
+    "Library/Developer/Xcode/DocumentationIndex"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(VsCodeCacheRule),
@@ -113,5 +137,8 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(CursorCacheRule),
         Box::new(ZedCacheRule),
         Box::new(SublimeCacheRule),
+        Box::new(XcodeProductsRule),
+        Box::new(XcodeIBSupportRule),
+        Box::new(XcodeDocIndexRule),
     ]
 }

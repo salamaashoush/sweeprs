@@ -31,7 +31,7 @@ impl CleanupRule for LargeFilesRule {
                 .git_global(false)
                 .git_exclude(false)
                 .follow_links(false)
-                .max_depth(Some(3))
+                .max_depth(Some(5))
                 .build();
 
             for entry in walker.flatten() {
@@ -48,6 +48,52 @@ impl CleanupRule for LargeFilesRule {
                         .unwrap_or_default();
                     entries.push(ScannedEntry {
                         path: entry.path().to_path_buf(),
+                        size,
+                        category: Category::LargeFile,
+                        safety: SafetyLevel::Danger,
+                        description: format!("{name} ({})", util::human_size(size)),
+                        item_count: None,
+                    });
+                }
+            }
+        }
+
+        // Shallow scan of home directory (depth 1) for large files sitting directly in ~/
+        if let Some(home) = dirs::home_dir() {
+            let walker = ignore::WalkBuilder::new(&home)
+                .hidden(false)
+                .ignore(false)
+                .git_ignore(false)
+                .git_global(false)
+                .git_exclude(false)
+                .follow_links(false)
+                .max_depth(Some(1))
+                .build();
+
+            for entry in walker.flatten() {
+                if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                    continue;
+                }
+
+                // Skip files already found in large_file_dirs
+                let path = entry.path();
+                if config
+                    .categories
+                    .large_file_dirs
+                    .iter()
+                    .any(|d| path.starts_with(Config::expand_path(d)))
+                {
+                    continue;
+                }
+
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if size >= threshold {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    entries.push(ScannedEntry {
+                        path: path.to_path_buf(),
                         size,
                         category: Category::LargeFile,
                         safety: SafetyLevel::Danger,

@@ -12,7 +12,7 @@ impl CleanupRule for RustToolchainRule {
     }
 
     fn category(&self) -> Category {
-        Category::RustToolchain
+        Category::Toolchain
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
@@ -44,7 +44,7 @@ impl CleanupRule for RustToolchainRule {
                     entries.push(ScannedEntry {
                         path,
                         size,
-                        category: Category::RustToolchain,
+                        category: Category::Toolchain,
                         safety: SafetyLevel::Caution,
                         description: format!("Toolchain: {name_str}"),
                         item_count: None,
@@ -65,7 +65,7 @@ impl CleanupRule for NodeVersionsRule {
     }
 
     fn category(&self) -> Category {
-        Category::RustToolchain
+        Category::Toolchain
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
@@ -97,7 +97,7 @@ impl CleanupRule for NodeVersionsRule {
                     entries.push(ScannedEntry {
                         path,
                         size,
-                        category: Category::RustToolchain,
+                        category: Category::Toolchain,
                         safety: SafetyLevel::Caution,
                         description: format!("Node.js: {name_str}"),
                         item_count: None,
@@ -118,7 +118,7 @@ impl CleanupRule for PythonVersionsRule {
     }
 
     fn category(&self) -> Category {
-        Category::RustToolchain
+        Category::Toolchain
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
@@ -161,7 +161,7 @@ impl CleanupRule for PythonVersionsRule {
                     entries.push(ScannedEntry {
                         path,
                         size,
-                        category: Category::RustToolchain,
+                        category: Category::Toolchain,
                         safety: SafetyLevel::Caution,
                         description: format!("Python: {name_str}"),
                         item_count: None,
@@ -182,7 +182,7 @@ impl CleanupRule for RubyVersionsRule {
     }
 
     fn category(&self) -> Category {
-        Category::RustToolchain
+        Category::Toolchain
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
@@ -220,7 +220,7 @@ impl CleanupRule for RubyVersionsRule {
                     entries.push(ScannedEntry {
                         path,
                         size,
-                        category: Category::RustToolchain,
+                        category: Category::Toolchain,
                         safety: SafetyLevel::Caution,
                         description: format!("Ruby: {name_str}"),
                         item_count: None,
@@ -241,7 +241,7 @@ impl CleanupRule for JavaVersionsRule {
     }
 
     fn category(&self) -> Category {
-        Category::RustToolchain
+        Category::Toolchain
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
@@ -290,7 +290,7 @@ impl CleanupRule for JavaVersionsRule {
                     entries.push(ScannedEntry {
                         path,
                         size,
-                        category: Category::RustToolchain,
+                        category: Category::Toolchain,
                         safety: SafetyLevel::Caution,
                         description: format!("Java: {name_str}"),
                         item_count: None,

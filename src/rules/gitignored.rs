@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 
 use crate::config::Config;
 use crate::rules::CleanupRule;
@@ -9,18 +11,22 @@ use crate::scanner::project_index::PROJECT_INDEX;
 use crate::scanner::walker;
 
 /// Directories already covered by other rules -- skip these to avoid duplicates.
-const KNOWN_ARTIFACT_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    ".build",
-    ".venv",
-    "venv",
-    ".tox",
-    "vendor",
-    "build",
-    "_build",
-    ".dart_tool",
-];
+static KNOWN_ARTIFACT_DIRS: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "node_modules",
+        "target",
+        ".build",
+        ".venv",
+        "venv",
+        ".tox",
+        "vendor",
+        "build",
+        "_build",
+        ".dart_tool",
+    ]
+    .into_iter()
+    .collect()
+});
 
 /// Minimum size to report (1 MiB). Tiny ignored dirs are not worth listing.
 const MIN_SIZE: u64 = 1_048_576;
@@ -117,7 +123,7 @@ fn find_ignored_in_project(root: &Path) -> Vec<(PathBuf, String)> {
         let name_str = name.to_string_lossy();
 
         // Skip dirs already handled by other rules
-        if KNOWN_ARTIFACT_DIRS.contains(&name_str.as_ref()) {
+        if KNOWN_ARTIFACT_DIRS.contains(name_str.as_ref()) {
             continue;
         }
 
