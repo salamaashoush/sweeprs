@@ -20,7 +20,10 @@ pub struct CleanOptions {
 
 pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
     let filtered: Vec<&ScannedEntry> = if options.include_unsafe {
-        entries.iter().collect()
+        entries
+            .iter()
+            .filter(|e| e.safety != SafetyLevel::Error)
+            .collect()
     } else {
         entries
             .iter()
@@ -60,6 +63,7 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
             SafetyLevel::Safe => "[Safe]".green(),
             SafetyLevel::Caution => "[Caution]".yellow(),
             SafetyLevel::Danger => "[Danger]".red(),
+            SafetyLevel::Error => "[Error]".magenta(),
         };
         println!(
             "  {} {:>10}  {}",

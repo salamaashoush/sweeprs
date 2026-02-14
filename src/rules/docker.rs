@@ -16,9 +16,35 @@ const DOCKER_TYPES: &[(&str, &[&str])] = &[
 
 impl DockerRule {
     fn parse_docker_df() -> Vec<ScannedEntry> {
-        let Some(result) = cli_cache::get("docker_system_df") else {
+        // Check if docker command was attempted and failed (daemon not running)
+        // vs simply not installed (no result at all)
+        let raw = cli_cache::get_raw("docker_system_df");
+        if let Some(result) = raw {
+            if !result.success {
+                // Docker is installed but daemon is not running -- surface a warning entry
+                let stderr = result.stderr.trim();
+                let msg = if stderr.contains("connect:") || stderr.contains("Cannot connect") {
+                    "Docker daemon not running (start Colima/Docker Desktop to scan images)"
+                } else if stderr.is_empty() {
+                    "Docker command failed (daemon may not be running)"
+                } else {
+                    "Docker command failed (daemon may not be running)"
+                };
+                return vec![ScannedEntry {
+                    path: std::path::PathBuf::from("docker:warning"),
+                    size: 0,
+                    category: Category::Docker,
+                    safety: SafetyLevel::Error,
+                    description: msg.to_owned(),
+                    item_count: None,
+                }];
+            }
+        } else {
+            // No result at all -- docker not installed or CLI_CACHE didn't run, skip silently
             return Vec::new();
-        };
+        }
+
+        let result = raw.unwrap();
 
         let mut entries = Vec::new();
 

@@ -138,5 +138,6 @@ fn safety_to_color(safety: SafetyLevel) -> ratatui::style::Color {
         SafetyLevel::Safe => theme::SAFE_COLOR,
         SafetyLevel::Caution => theme::CAUTION_COLOR,
         SafetyLevel::Danger => theme::DANGER_COLOR,
+        SafetyLevel::Error => theme::ERROR_COLOR,
     }
 }

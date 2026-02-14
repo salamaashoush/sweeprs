@@ -20,9 +20,27 @@ impl CleanupRule for BrewCleanupRule {
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let Some(result) = cli_cache::get("brew_cleanup") else {
+        let raw = cli_cache::get_raw("brew_cleanup");
+        let Some(result) = raw else {
+            // brew not installed or CLI_CACHE didn't run
             return Vec::new();
         };
+        if !result.success {
+            let stderr = result.stderr.trim();
+            let msg = if stderr.is_empty() {
+                "brew cleanup failed (timed out or brew not working)"
+            } else {
+                "brew cleanup failed (check brew installation)"
+            };
+            return vec![ScannedEntry {
+                path: std::path::PathBuf::from("brew:warning:cleanup"),
+                size: 0,
+                category: Category::PackageCache,
+                safety: SafetyLevel::Error,
+                description: msg.to_owned(),
+                item_count: None,
+            }];
+        }
 
         // Last line of `brew cleanup -n` looks like:
         //   ==> This operation would free approximately 119.3MB of disk space.
@@ -58,9 +76,26 @@ impl CleanupRule for BrewAutoremoveRule {
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let Some(result) = cli_cache::get("brew_autoremove") else {
+        let raw = cli_cache::get_raw("brew_autoremove");
+        let Some(result) = raw else {
             return Vec::new();
         };
+        if !result.success {
+            let stderr = result.stderr.trim();
+            let msg = if stderr.is_empty() {
+                "brew autoremove failed (timed out or brew not working)"
+            } else {
+                "brew autoremove failed (check brew installation)"
+            };
+            return vec![ScannedEntry {
+                path: std::path::PathBuf::from("brew:warning:autoremove"),
+                size: 0,
+                category: Category::PackageCache,
+                safety: SafetyLevel::Error,
+                description: msg.to_owned(),
+                item_count: None,
+            }];
+        }
 
         // Output format:
         //   ==> Would autoremove 36 unneeded formulae:

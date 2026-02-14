@@ -3,6 +3,7 @@ use crate::rules::{CleanupRule, cache_rule};
 use crate::scanner::cli_cache;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::scanner::walker;
+use crate::platform;
 
 pub struct TimeMachineSnapshotsRule;
 
@@ -16,9 +17,28 @@ impl CleanupRule for TimeMachineSnapshotsRule {
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let Some(result) = cli_cache::get("tmutil_snapshots") else {
+        let raw = cli_cache::get_raw("tmutil_snapshots");
+        let Some(result) = raw else {
             return Vec::new();
         };
+        if !result.success {
+            let stderr = result.stderr.trim();
+            let msg = if stderr.contains("requires root") || stderr.contains("Operation not permitted") {
+                "tmutil failed (requires root privileges)"
+            } else if stderr.is_empty() {
+                "tmutil failed (timed out or not available)"
+            } else {
+                "tmutil failed (check Time Machine configuration)"
+            };
+            return vec![ScannedEntry {
+                path: std::path::PathBuf::from("/Time Machine Snapshots"),
+                size: 0,
+                category: Category::MacosSpecific,
+                safety: SafetyLevel::Error,
+                description: msg.to_owned(),
+                item_count: None,
+            }];
+        }
 
         let snapshot_count = result
             .stdout
@@ -30,7 +50,7 @@ impl CleanupRule for TimeMachineSnapshotsRule {
             return Vec::new();
         }
 
-        let size = parse_snapshot_sizes();
+        let size = platform::parse_snapshot_bytes();
 
         vec![ScannedEntry {
             path: std::path::PathBuf::from("/Time Machine Snapshots"),
@@ -41,38 +61,6 @@ impl CleanupRule for TimeMachineSnapshotsRule {
             item_count: Some(snapshot_count),
         }]
     }
-}
-
-/// Parse total snapshot size from `diskutil apfs list` output.
-fn parse_snapshot_sizes() -> u64 {
-    let Some(result) = cli_cache::get("diskutil_apfs_list") else {
-        return 0;
-    };
-
-    let mut total = 0u64;
-    let lines: Vec<&str> = result.stdout.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
-        if line.contains("Snapshot Name:") && line.contains("com.apple.TimeMachine") {
-            for following in &lines[i + 1..] {
-                if following.contains("Snapshot Disk Size:") {
-                    if let Some(start) = following.find('(') {
-                        if let Some(end) = following[start..].find(" Bytes)") {
-                            if let Ok(bytes) =
-                                following[start + 1..start + end].trim().parse::<u64>()
-                            {
-                                total += bytes;
-                            }
-                        }
-                    }
-                    break;
-                }
-                if following.contains("Snapshot Name:") {
-                    break;
-                }
-            }
-        }
-    }
-    total
 }
 
 pub struct XcodeSimulatorsRule;

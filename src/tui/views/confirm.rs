@@ -31,6 +31,7 @@ pub fn render(f: &mut Frame, area: Rect, entries: &[ScannedEntry]) {
             SafetyLevel::Safe => theme::SAFE_COLOR,
             SafetyLevel::Caution => theme::CAUTION_COLOR,
             SafetyLevel::Danger => theme::DANGER_COLOR,
+            SafetyLevel::Error => theme::ERROR_COLOR,
         };
         lines.push(Line::from(vec![
             Span::styled(

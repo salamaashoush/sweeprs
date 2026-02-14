@@ -13,5 +13,6 @@ pub const BORDER: Color = Color::Rgb(61, 66, 91);
 pub const SAFE_COLOR: Color = GREEN;
 pub const CAUTION_COLOR: Color = YELLOW;
 pub const DANGER_COLOR: Color = RED;
+pub const ERROR_COLOR: Color = Color::Rgb(187, 154, 247);
 
 pub const BAR_FILL: Color = Color::Rgb(86, 95, 137);
