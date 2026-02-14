@@ -216,8 +216,13 @@ pub fn uninstall() -> Result<()> {
     Ok(())
 }
 
-pub fn run_foreground() -> Result<()> {
-    let config = Config::load()?;
+pub fn run_foreground(auto_clean: bool) -> Result<()> {
+    let mut config = Config::load()?;
+    // CLI --auto-clean flag overrides config
+    if auto_clean {
+        config.monitor.auto_clean = true;
+    }
+
     let pid_path = daemon::pid_file_path();
     let pid = std::process::id();
 
@@ -234,6 +239,9 @@ pub fn run_foreground() -> Result<()> {
     })?;
 
     eprintln!("[sweeprs monitor] Starting (PID: {pid})");
+    if config.monitor.auto_clean {
+        eprintln!("[sweeprs monitor] Auto-clean enabled");
+    }
     daemon::run_loop(&config, &shutdown);
 
     let _ = std::fs::remove_file(&pid_path);

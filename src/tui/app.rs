@@ -111,27 +111,9 @@ impl App {
     }
 
     fn rebuild_tree(&mut self) {
-        if self.search_active && !self.search_query.is_empty() {
-            let query = self.search_query.to_lowercase();
-            let filtered = ScanResult {
-                entries: self
-                    .result
-                    .entries
-                    .iter()
-                    .filter(|e| {
-                        let path_str = e.path.display().to_string().to_lowercase();
-                        let desc = e.description.to_lowercase();
-                        path_str.contains(&query) || desc.contains(&query)
-                    })
-                    .cloned()
-                    .collect(),
-                total_size: self.result.total_size,
-                disk_info: self.result.disk_info.clone(),
-                scan_duration_secs: self.result.scan_duration_secs,
-            };
-            self.tree = Tree::from_scan_result(&filtered);
-        } else {
-            self.tree = Tree::from_scan_result(&self.result);
+        self.tree = Tree::from_scan_result(&self.result);
+        if self.search_active {
+            self.tree.apply_search_filter(&self.search_query);
         }
         let visible_count = self.tree.visible_rows().len();
         if visible_count == 0 {

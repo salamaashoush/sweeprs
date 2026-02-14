@@ -11,7 +11,7 @@ pub enum Category {
     InstalledDeps,
     BrowserCache,
     IdeCache,
-    RustToolchain,
+    Toolchain,
     Docker,
     LogFile,
     Trash,
@@ -23,6 +23,7 @@ pub enum Category {
     SystemJunk,
     MobileBackup,
     LlmModels,
+    StaleProject,
 }
 
 impl Category {
@@ -33,7 +34,7 @@ impl Category {
         Self::InstalledDeps,
         Self::BrowserCache,
         Self::IdeCache,
-        Self::RustToolchain,
+        Self::Toolchain,
         Self::Docker,
         Self::LogFile,
         Self::Trash,
@@ -45,6 +46,7 @@ impl Category {
         Self::SystemJunk,
         Self::MobileBackup,
         Self::LlmModels,
+        Self::StaleProject,
     ];
 
     pub fn default_safety(self) -> SafetyLevel {
@@ -55,14 +57,15 @@ impl Category {
             | Self::BrowserCache
             | Self::IdeCache
             | Self::AppCache => SafetyLevel::Safe,
-            Self::RustToolchain
+            Self::Toolchain
             | Self::Docker
             | Self::LogFile
             | Self::OldDownload
             | Self::MacosSpecific
             | Self::SystemJunk
             | Self::MobileBackup
-            | Self::LlmModels => SafetyLevel::Caution,
+            | Self::LlmModels
+            | Self::StaleProject => SafetyLevel::Caution,
             Self::Trash | Self::LargeFile | Self::Duplicate => SafetyLevel::Danger,
         }
     }
@@ -76,7 +79,7 @@ impl fmt::Display for Category {
             Self::InstalledDeps => write!(f, "Installed Dependencies"),
             Self::BrowserCache => write!(f, "Browser Caches"),
             Self::IdeCache => write!(f, "IDE Caches"),
-            Self::RustToolchain => write!(f, "Rust Toolchains"),
+            Self::Toolchain => write!(f, "Toolchains"),
             Self::Docker => write!(f, "Docker"),
             Self::LogFile => write!(f, "Log Files"),
             Self::Trash => write!(f, "Trash"),
@@ -88,6 +91,7 @@ impl fmt::Display for Category {
             Self::SystemJunk => write!(f, "System Junk"),
             Self::MobileBackup => write!(f, "Mobile Backups"),
             Self::LlmModels => write!(f, "LLM Models"),
+            Self::StaleProject => write!(f, "Stale Projects"),
         }
     }
 }
@@ -98,6 +102,8 @@ pub enum SafetyLevel {
     Safe,
     Caution,
     Danger,
+    /// Scan failed for this entry (tool not available, daemon not running, timeout, etc.)
+    Error,
 }
 
 impl fmt::Display for SafetyLevel {
@@ -106,6 +112,7 @@ impl fmt::Display for SafetyLevel {
             Self::Safe => write!(f, "Safe"),
             Self::Caution => write!(f, "Caution"),
             Self::Danger => write!(f, "Danger"),
+            Self::Error => write!(f, "Error"),
         }
     }
 }
@@ -140,6 +147,16 @@ impl ScanResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeInfo {
+    pub name: String,
+    pub mount_point: String,
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+    pub used_bytes: u64,
+    pub usage_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiskInfo {
     pub name: String,
     pub mount_point: String,
@@ -149,4 +166,14 @@ pub struct DiskInfo {
     pub usage_percent: f64,
     pub purgeable_bytes: Option<u64>,
     pub snapshot_bytes: u64,
+    /// Size of locally cached iCloud Drive files that could be evicted.
+    pub icloud_local_bytes: Option<u64>,
+    /// Estimated size consumed by system and apps (not user data).
+    pub system_app_bytes: Option<u64>,
+    /// Other mounted APFS volumes (non-root).
+    #[serde(default)]
+    pub other_volumes: Vec<VolumeInfo>,
+    /// Estimated bytes reclaimable by deleting old Time Machine snapshots.
+    #[serde(default)]
+    pub tm_reclaimable_bytes: Option<u64>,
 }

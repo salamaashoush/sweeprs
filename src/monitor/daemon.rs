@@ -2,8 +2,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::cleaner;
 use crate::config::Config;
 use crate::platform;
+use crate::rules::RuleEngine;
+use crate::scanner::entry::SafetyLevel;
 use crate::util;
 
 use super::notify;
@@ -28,6 +31,7 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
 
     let mut last_warning_at: Option<Instant> = None;
     let mut last_critical_at: Option<Instant> = None;
+    let mut last_auto_clean_at: Option<Instant> = None;
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -35,7 +39,7 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
             break;
         }
 
-        match platform::get_disk_info() {
+        match platform::get_disk_info_fast() {
             Ok(info) => {
                 let pct = info.usage_percent;
                 let free = util::human_size(info.available_bytes);
@@ -56,6 +60,16 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
                     last_warning_at = Some(Instant::now());
                 }
 
+                // Auto-clean: when enabled and disk exceeds warning threshold
+                if config.monitor.auto_clean
+                    && pct >= warning_threshold
+                    && should_notify(last_auto_clean_at.as_ref())
+                {
+                    eprintln!("[sweeprs monitor] Auto-clean triggered at {pct:.1}% usage");
+                    run_auto_clean(config);
+                    last_auto_clean_at = Some(Instant::now());
+                }
+
                 eprintln!("[sweeprs monitor] Disk: {pct:.1}% used, {free} free");
             }
             Err(e) => {
@@ -71,6 +85,56 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
             }
             std::thread::sleep(TICK.min(deadline - Instant::now()));
         }
+    }
+}
+
+/// Run auto-clean: scan configured categories and delete only Safe-level entries.
+fn run_auto_clean(config: &Config) {
+    let categories = config.auto_clean_categories();
+    if categories.is_empty() {
+        eprintln!("[sweeprs monitor] Auto-clean: no categories configured");
+        return;
+    }
+
+    let engine = RuleEngine::new(config);
+
+    // Scan configured auto-clean categories
+    let mut all_entries = Vec::new();
+    for cat in &categories {
+        if config.is_category_enabled(*cat) {
+            let result = engine.scan_category(*cat, config, None);
+            all_entries.extend(result.entries);
+        }
+    }
+
+    // Filter to only Safe items
+    let safe_entries: Vec<_> = all_entries
+        .into_iter()
+        .filter(|e| e.safety == SafetyLevel::Safe)
+        .collect();
+
+    if safe_entries.is_empty() {
+        eprintln!("[sweeprs monitor] Auto-clean: nothing safe to clean");
+        return;
+    }
+
+    let total: u64 = safe_entries.iter().map(|e| e.size).sum();
+    eprintln!(
+        "[sweeprs monitor] Auto-clean: {} safe items, {} total",
+        safe_entries.len(),
+        util::human_size(total),
+    );
+
+    let options = cleaner::CleanOptions {
+        dry_run: false,
+        skip_confirm: true,
+        include_unsafe: false,
+    };
+
+    if let Err(e) = cleaner::clean(&safe_entries, &options) {
+        eprintln!("[sweeprs monitor] Auto-clean error: {e}");
+    } else {
+        eprintln!("[sweeprs monitor] Auto-clean complete");
     }
 }
 

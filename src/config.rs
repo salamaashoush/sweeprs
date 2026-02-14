@@ -42,6 +42,11 @@ pub struct ScanConfig {
     pub threads: usize,
     #[serde(alias = "followSymlinks")]
     pub follow_symlinks: bool,
+    /// Project search roots for build/deps/gitignored scanning.
+    /// Paths relative to home directory (e.g. "Workspace") or absolute.
+    /// Defaults to: Workspace, Projects, Developer, Code, src, dev
+    #[serde(alias = "projectRoots")]
+    pub project_roots: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +65,9 @@ pub struct CategoriesConfig {
     #[serde(alias = "duplicateDirs")]
     pub duplicate_dirs: Vec<String>,
     pub enabled: EnabledCategories,
+    /// Days since last commit to consider a project stale (default: 90)
+    #[serde(alias = "staleProjectDays")]
+    pub stale_project_days: u64,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -97,6 +105,8 @@ pub struct EnabledCategories {
     pub mobile_backup: bool,
     #[serde(alias = "llmModels")]
     pub llm_models: bool,
+    #[serde(alias = "staleProject")]
+    pub stale_project: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +118,13 @@ pub struct MonitorConfig {
     pub warning_threshold_percent: u8,
     #[serde(alias = "criticalThresholdPercent")]
     pub critical_threshold_percent: u8,
+    /// When true, the monitor daemon will auto-clean safe items when disk exceeds warning threshold
+    #[serde(alias = "autoClean")]
+    pub auto_clean: bool,
+    /// Categories to auto-clean (same names as CLI args: cache, build, browser, etc.)
+    /// If empty, defaults to: cache, build, browser, ide, app-cache
+    #[serde(alias = "autoCleanCategories")]
+    pub auto_clean_categories: Vec<String>,
 }
 
 impl Default for GeneralConfig {
@@ -129,6 +146,7 @@ impl Default for ScanConfig {
             max_depth: 10,
             threads: 0,
             follow_symlinks: false,
+            project_roots: Vec::new(),
         }
     }
 }
@@ -143,6 +161,7 @@ impl Default for CategoriesConfig {
             duplicate_min_size: 1_048_576,
             duplicate_dirs: Vec::new(),
             enabled: EnabledCategories::default(),
+            stale_project_days: 90,
         }
     }
 }
@@ -167,6 +186,7 @@ impl Default for EnabledCategories {
             system_junk: true,
             mobile_backup: true,
             llm_models: true,
+            stale_project: true,
         }
     }
 }
@@ -177,6 +197,8 @@ impl Default for MonitorConfig {
             poll_interval_secs: 3600,
             warning_threshold_percent: 85,
             critical_threshold_percent: 95,
+            auto_clean: false,
+            auto_clean_categories: Vec::new(),
         }
     }
 }
@@ -200,6 +222,31 @@ impl Config {
         }
     }
 
+    /// Load a per-project .sweeprsrc config and merge it with the global config.
+    /// Project config values override global config values.
+    #[allow(dead_code)]
+    pub fn load_with_project(project_dir: &Path) -> Result<Self> {
+        let mut config = Self::load()?;
+
+        let rc_path = project_dir.join(".sweeprsrc");
+        if rc_path.exists() {
+            let contents = std::fs::read_to_string(&rc_path)?;
+            let project_config: Self = toml::from_str(&contents)?;
+            // Merge: project overrides global for non-default values
+            if !project_config.general.global_excludes.is_empty() {
+                config
+                    .general
+                    .global_excludes
+                    .extend(project_config.general.global_excludes);
+            }
+            if !project_config.scan.project_roots.is_empty() {
+                config.scan.project_roots = project_config.scan.project_roots;
+            }
+        }
+
+        Ok(config)
+    }
+
     pub fn save_default(path: &Path) -> Result<()> {
         let config = Self::default();
         let contents = toml::to_string_pretty(&config)?;
@@ -218,7 +265,7 @@ impl Config {
             Category::InstalledDeps => self.categories.enabled.installed_deps,
             Category::BrowserCache => self.categories.enabled.browser_cache,
             Category::IdeCache => self.categories.enabled.ide_cache,
-            Category::RustToolchain => self.categories.enabled.rust_toolchain,
+            Category::Toolchain => self.categories.enabled.rust_toolchain,
             Category::Docker => self.categories.enabled.docker,
             Category::LogFile => self.categories.enabled.log_file,
             Category::Trash => self.categories.enabled.trash,
@@ -230,6 +277,7 @@ impl Config {
             Category::SystemJunk => self.categories.enabled.system_junk,
             Category::MobileBackup => self.categories.enabled.mobile_backup,
             Category::LlmModels => self.categories.enabled.llm_models,
+            Category::StaleProject => self.categories.enabled.stale_project,
         }
     }
 
@@ -242,7 +290,7 @@ impl Config {
             "deps" => Some(Category::InstalledDeps),
             "browser" => Some(Category::BrowserCache),
             "ide" => Some(Category::IdeCache),
-            "toolchain" => Some(Category::RustToolchain),
+            "toolchain" => Some(Category::Toolchain),
             "docker" => Some(Category::Docker),
             "logs" => Some(Category::LogFile),
             "trash" => Some(Category::Trash),
@@ -254,6 +302,7 @@ impl Config {
             "system-junk" => Some(Category::SystemJunk),
             "mobile-backup" => Some(Category::MobileBackup),
             "llm" | "llm-models" => Some(Category::LlmModels),
+            "stale-project" | "stale-projects" => Some(Category::StaleProject),
             _ => None,
         }
     }
@@ -270,6 +319,15 @@ impl Config {
             .filter_map(|s| Self::parse_category(s))
             .collect();
         if cats.is_empty() { None } else { Some(cats) }
+    }
+
+    /// Get the auto-clean categories from config.
+    pub fn auto_clean_categories(&self) -> Vec<crate::scanner::entry::Category> {
+        self.monitor
+            .auto_clean_categories
+            .iter()
+            .filter_map(|s| Self::parse_category(s))
+            .collect()
     }
 
     pub fn expand_path(path: &str) -> PathBuf {

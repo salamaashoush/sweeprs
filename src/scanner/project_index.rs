@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 
 /// A directory discovered during the shared walk of project search roots.
 #[derive(Debug)]
@@ -11,7 +12,7 @@ pub struct IndexedDir {
     pub name: String,
 }
 
-/// Pre-built index of all directories under the 6 standard search roots, walked once.
+/// Pre-built index of all directories under the standard search roots, walked once.
 ///
 /// `BuildArtifactRule`, `InstalledDepsRule`, and `GitignoredRule` all filter over
 /// this shared index instead of each doing their own depth-6 walk.
@@ -19,21 +20,29 @@ pub static PROJECT_INDEX: LazyLock<ProjectIndex> = LazyLock::new(ProjectIndex::b
 
 const MAX_SCAN_DEPTH: usize = 6;
 
+/// Default project search roots (relative to home directory).
+const DEFAULT_SEARCH_ROOTS: &[&str] =
+    &["Workspace", "Projects", "Developer", "Code", "src", "dev"];
+
 /// Heavy directories to never recurse into during indexing.
-const SKIP_DIRS: &[&str] = &[
-    "node_modules",
-    "target",
-    ".build",
-    ".venv",
-    "venv",
-    ".tox",
-    "vendor",
-    "build",
-    "_build",
-    ".dart_tool",
-    ".git",
-    "__pycache__",
-];
+static SKIP_DIRS: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "node_modules",
+        "target",
+        ".build",
+        ".venv",
+        "venv",
+        ".tox",
+        "vendor",
+        "build",
+        "_build",
+        ".dart_tool",
+        ".git",
+        "__pycache__",
+    ]
+    .into_iter()
+    .collect()
+});
 
 pub struct ProjectIndex {
     /// All directories found during the walk.
@@ -44,13 +53,26 @@ pub struct ProjectIndex {
 
 impl ProjectIndex {
     fn build() -> Self {
+        Self::build_with_roots(DEFAULT_SEARCH_ROOTS)
+    }
+
+    /// Build the index with custom search root names (relative to home).
+    pub fn build_with_roots(root_names: &[&str]) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
-        let search_roots: Vec<PathBuf> =
-            ["Workspace", "Projects", "Developer", "Code", "src", "dev"]
-                .iter()
-                .map(|name| home.join(name))
-                .filter(|p| p.exists())
-                .collect();
+        let search_roots: Vec<PathBuf> = root_names
+            .iter()
+            .map(|name| {
+                // Support both relative names and absolute/tilde-expanded paths
+                if name.starts_with('/') {
+                    PathBuf::from(name)
+                } else if let Some(stripped) = name.strip_prefix("~/") {
+                    home.join(stripped)
+                } else {
+                    home.join(name)
+                }
+            })
+            .filter(|p| p.exists())
+            .collect();
 
         // Walk each root in parallel via rayon.
         let results: Vec<(Vec<IndexedDir>, Vec<PathBuf>)> = search_roots
@@ -153,8 +175,8 @@ fn walk_dir(dir: &Path, depth: usize, dirs: &mut Vec<IndexedDir>, git_roots: &mu
             name: name_owned.clone(),
         });
 
-        // Don't recurse into known heavy dirs.
-        if !SKIP_DIRS.contains(&name_owned.as_str()) {
+        // Don't recurse into known heavy dirs (O(1) HashSet lookup).
+        if !SKIP_DIRS.contains(name_owned.as_str()) {
             subdirs.push(path);
         }
     }

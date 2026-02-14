@@ -98,6 +98,11 @@ impl Widget for DiskBar<'_> {
             if snapshot > 0 {
                 parts.push(format!("{} snapshots", util::human_size(snapshot)));
             }
+            if let Some(icloud) = self.disk_info.icloud_local_bytes {
+                if icloud > 0 {
+                    parts.push(format!("{} iCloud", util::human_size(icloud)));
+                }
+            }
             format!("{} - {} free", parts.join(", "), util::human_size(free))
         } else {
             format!(

@@ -2,6 +2,7 @@ mod cleaner;
 mod commands;
 mod config;
 mod filter;
+mod history;
 mod monitor;
 mod output;
 mod platform;
@@ -95,6 +96,9 @@ enum Command {
         /// Uninstall launchd service
         #[arg(long)]
         uninstall: bool,
+        /// Auto-clean safe items when disk exceeds warning threshold
+        #[arg(long)]
+        auto_clean: bool,
     },
     /// Manage configuration
     Config {
@@ -105,10 +109,19 @@ enum Command {
         #[arg(long)]
         path: bool,
     },
+    /// Show scan history and disk usage trends
+    History,
     /// List all scan categories
     Categories,
     /// Update sweeprs to the latest version
     Upgrade,
+    /// Compare two scan results (JSON files)
+    Diff {
+        /// First scan result file
+        before: String,
+        /// Second scan result file
+        after: String,
+    },
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for (auto-detected if omitted)
@@ -139,6 +152,7 @@ enum CategoryArg {
     SystemJunk,
     MobileBackup,
     Llm,
+    StaleProject,
 }
 
 impl CategoryArg {
@@ -149,7 +163,7 @@ impl CategoryArg {
             Self::Deps => Category::InstalledDeps,
             Self::Browser => Category::BrowserCache,
             Self::Ide => Category::IdeCache,
-            Self::Toolchain => Category::RustToolchain,
+            Self::Toolchain => Category::Toolchain,
             Self::Docker => Category::Docker,
             Self::Logs => Category::LogFile,
             Self::Trash => Category::Trash,
@@ -161,6 +175,7 @@ impl CategoryArg {
             Self::SystemJunk => Category::SystemJunk,
             Self::MobileBackup => Category::MobileBackup,
             Self::Llm => Category::LlmModels,
+            Self::StaleProject => Category::StaleProject,
         }
     }
 }
@@ -185,6 +200,7 @@ enum CleanTarget {
     SystemJunk,
     MobileBackup,
     Llm,
+    StaleProject,
 }
 
 impl CleanTarget {
@@ -196,7 +212,7 @@ impl CleanTarget {
             Self::Deps => Some(Category::InstalledDeps),
             Self::Browser => Some(Category::BrowserCache),
             Self::Ide => Some(Category::IdeCache),
-            Self::Toolchain => Some(Category::RustToolchain),
+            Self::Toolchain => Some(Category::Toolchain),
             Self::Docker => Some(Category::Docker),
             Self::Logs => Some(Category::LogFile),
             Self::Trash => Some(Category::Trash),
@@ -208,6 +224,7 @@ impl CleanTarget {
             Self::SystemJunk => Some(Category::SystemJunk),
             Self::MobileBackup => Some(Category::MobileBackup),
             Self::Llm => Some(Category::LlmModels),
+            Self::StaleProject => Some(Category::StaleProject),
         }
     }
 }
@@ -294,6 +311,11 @@ fn main() -> Result<()> {
                 eprintln!("Scan results saved to: {save_path}");
             }
 
+            // Auto-save to scan history (unless loading a previous scan)
+            if load.is_none() {
+                history::save_scan(&result);
+            }
+
             if json {
                 output::print_json(&result)?;
             } else {
@@ -340,6 +362,7 @@ fn main() -> Result<()> {
             };
 
             apply_filter(&mut result, &filters, &exclude, min_size, &config)?;
+            history::save_scan(&result);
             print_scan_summary(&result);
 
             // Resolve safety level: CLI --all overrides, then config default_clean_safety
@@ -365,6 +388,7 @@ fn main() -> Result<()> {
             foreground,
             install,
             uninstall,
+            auto_clean,
         }) => {
             if install {
                 monitor::install()?;
@@ -375,7 +399,7 @@ fn main() -> Result<()> {
             } else if status {
                 monitor::status()?;
             } else if foreground {
-                monitor::run_foreground()?;
+                monitor::run_foreground(auto_clean)?;
             } else {
                 monitor::start()?;
             }
@@ -396,6 +420,9 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Some(Command::History) => {
+            history::print_history();
+        }
         Some(Command::Categories) => {
             println!("{:<20} {:<10} CLI ARG", "CATEGORY", "SAFETY");
             println!("{}", "-".repeat(50));
@@ -406,7 +433,7 @@ fn main() -> Result<()> {
                     Category::InstalledDeps => "deps",
                     Category::BrowserCache => "browser",
                     Category::IdeCache => "ide",
-                    Category::RustToolchain => "toolchain",
+                    Category::Toolchain => "toolchain",
                     Category::Docker => "docker",
                     Category::LogFile => "logs",
                     Category::Trash => "trash",
@@ -418,9 +445,16 @@ fn main() -> Result<()> {
                     Category::SystemJunk => "system-junk",
                     Category::MobileBackup => "mobile-backup",
                     Category::LlmModels => "llm",
+                    Category::StaleProject => "stale-project",
                 };
                 println!("{:<20} {:<10} {}", cat, cat.default_safety(), arg);
             }
+        }
+        Some(Command::Diff { before, after }) => {
+            commands::diff::diff_scans(
+                std::path::Path::new(&before),
+                std::path::Path::new(&after),
+            )?;
         }
         Some(Command::Upgrade) => commands::upgrade::execute()?,
         Some(Command::Completions { shell, install }) => {

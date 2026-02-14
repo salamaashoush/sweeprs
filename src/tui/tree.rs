@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::PathBuf;
 
 use indexmap::IndexMap;
@@ -15,6 +16,7 @@ pub struct CategoryNode {
     pub category: Category,
     pub groups: Vec<GroupNode>,
     pub expanded: bool,
+    pub hidden: bool,
     pub total_size: u64,
     pub entry_count: usize,
 }
@@ -23,6 +25,7 @@ pub struct GroupNode {
     pub name: String,
     pub entries: Vec<EntryNode>,
     pub expanded: bool,
+    pub hidden: bool,
     pub total_size: u64,
     pub safety: SafetyLevel,
 }
@@ -38,6 +41,7 @@ pub struct EntryNode {
 
 pub struct Tree {
     pub categories: Vec<CategoryNode>,
+    cached_rows: RefCell<Option<Vec<RowRef>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +97,7 @@ impl Tree {
                             name: name.to_string(),
                             entries: entry_nodes,
                             expanded: false,
+                            hidden: false,
                             total_size: group_total,
                             safety: worst_safety,
                         }
@@ -105,6 +110,7 @@ impl Tree {
                     category,
                     groups,
                     expanded: true,
+                    hidden: false,
                     total_size,
                     entry_count,
                 }
@@ -113,15 +119,49 @@ impl Tree {
 
         categories.sort_by(|a, b| b.total_size.cmp(&a.total_size));
 
-        Self { categories }
+        Self {
+            categories,
+            cached_rows: RefCell::new(None),
+        }
+    }
+
+    pub fn apply_search_filter(&mut self, query: &str) {
+        *self.cached_rows.borrow_mut() = None;
+        if query.is_empty() {
+            for cat in &mut self.categories {
+                cat.hidden = false;
+                for group in &mut cat.groups {
+                    group.hidden = false;
+                }
+            }
+            return;
+        }
+        let query = query.to_lowercase();
+        for cat in &mut self.categories {
+            let mut any_visible = false;
+            for group in &mut cat.groups {
+                let matches = group.entries.iter().any(|e| {
+                    e.path.display().to_string().to_lowercase().contains(&query)
+                        || e.description.to_lowercase().contains(&query)
+                });
+                group.hidden = !matches;
+                if matches { any_visible = true; }
+            }
+            cat.hidden = !any_visible;
+        }
     }
 
     pub fn visible_rows(&self) -> Vec<RowRef> {
+        if let Some(ref cached) = *self.cached_rows.borrow() {
+            return cached.clone();
+        }
         let mut rows = Vec::new();
         for (ci, cat) in self.categories.iter().enumerate() {
+            if cat.hidden { continue; }
             rows.push(RowRef::Category(ci));
             if cat.expanded {
                 for (gi, group) in cat.groups.iter().enumerate() {
+                    if group.hidden { continue; }
                     rows.push(RowRef::Group(ci, gi));
                     if group.expanded {
                         for ei in 0..group.entries.len() {
@@ -131,6 +171,7 @@ impl Tree {
                 }
             }
         }
+        *self.cached_rows.borrow_mut() = Some(rows.clone());
         rows
     }
 
@@ -179,6 +220,7 @@ impl Tree {
     }
 
     pub fn toggle(&mut self, row: RowRef) {
+        *self.cached_rows.borrow_mut() = None;
         match row {
             RowRef::Category(ci) => {
                 let new_state = self.category_check_state(ci) != CheckState::Checked;
@@ -202,6 +244,7 @@ impl Tree {
     }
 
     pub fn expand(&mut self, row: RowRef) {
+        *self.cached_rows.borrow_mut() = None;
         match row {
             RowRef::Category(ci) => self.categories[ci].expanded = true,
             RowRef::Group(ci, gi) => self.categories[ci].groups[gi].expanded = true,
@@ -210,6 +253,7 @@ impl Tree {
     }
 
     pub fn collapse(&mut self, row: RowRef) {
+        *self.cached_rows.borrow_mut() = None;
         match row {
             RowRef::Category(ci) => self.categories[ci].expanded = false,
             RowRef::Group(ci, gi) => self.categories[ci].groups[gi].expanded = false,
