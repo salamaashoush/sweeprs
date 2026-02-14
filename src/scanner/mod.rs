@@ -51,7 +51,7 @@ pub fn scan_category(config: &Config, category: Category) -> Result<ScanResult> 
     let start = Instant::now();
     let mut result = engine.scan_category(category, config, None);
     result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
-    result.disk_info = Some(platform::get_disk_info()?);
+    result.disk_info = Some(platform::get_disk_info_fast()?);
     Ok(result)
 }
 
@@ -172,10 +172,15 @@ pub fn scan_categories_with_progress(
     let engine = RuleEngine::new(config);
     let start = Instant::now();
 
-    // Scan each category and merge results
+    // Scan each category in parallel and merge results
+    use rayon::prelude::*;
+    let partials: Vec<entry::ScanResult> = categories
+        .par_iter()
+        .map(|cat| engine.scan_category(*cat, config, Some(&progress)))
+        .collect();
+
     let mut combined = entry::ScanResult::default();
-    for cat in categories {
-        let partial = engine.scan_category(*cat, config, Some(&progress));
+    for partial in partials {
         combined.entries.extend(partial.entries);
         combined.total_size += partial.total_size;
     }
@@ -184,7 +189,7 @@ pub fn scan_categories_with_progress(
     let _ = tick_handle.join();
     spinner.finish_and_clear();
 
-    combined.disk_info = Some(platform::get_disk_info()?);
+    combined.disk_info = Some(platform::get_disk_info_fast()?);
     Ok(combined)
 }
 
@@ -238,6 +243,6 @@ pub fn scan_category_with_progress(config: &Config, category: Category) -> Resul
 
     spinner.finish_and_clear();
 
-    result.disk_info = Some(platform::get_disk_info()?);
+    result.disk_info = Some(platform::get_disk_info_fast()?);
     Ok(result)
 }

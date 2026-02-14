@@ -80,6 +80,7 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
         ("brew_cleanup", &["brew", "cleanup", "-n"]),
         ("brew_autoremove", &["brew", "autoremove", "--dry-run"]),
         ("diskutil_apfs_list", &["diskutil", "apfs", "list"]),
+        ("diskutil_info_root", &["diskutil", "info", "-plist", "/"]),
     ];
 
     let mut results = FxHashMap::default();

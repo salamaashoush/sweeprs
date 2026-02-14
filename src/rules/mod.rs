@@ -7,20 +7,31 @@ pub mod cache;
 pub mod cloud_cache;
 pub mod conda;
 pub mod containers;
+pub mod core_dumps;
+pub mod dev_caches;
 pub mod docker;
 pub mod downloads;
+pub mod ds_store;
 pub mod duplicates;
+pub mod electron_data;
+pub mod empty_dirs;
+pub mod generic_caches;
+pub mod git_data;
 pub mod gitignored;
 pub mod ide;
 pub mod large_files;
 pub mod llm;
 pub mod logs;
 pub mod macos;
+pub mod orphan_detection;
+pub mod stale_project;
 pub mod mobile;
 pub mod pycache;
 pub mod system;
+pub mod test_artifacts;
 pub mod toolchain;
 pub mod trash;
+pub mod virtualization;
 
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -75,6 +86,7 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(cache::rules());
     rules.extend(brew::rules());
     rules.extend(build::rules());
+    rules.extend(git_data::rules());
     rules.extend(gitignored::rules());
     rules.extend(browser::rules());
     rules.extend(ide::rules());
@@ -95,14 +107,64 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(containers::rules());
     rules.extend(cloud_cache::rules());
     rules.extend(llm::rules());
+    rules.extend(dev_caches::rules());
+    rules.extend(test_artifacts::rules());
+    rules.extend(core_dumps::rules());
+    rules.extend(electron_data::rules());
+    rules.extend(virtualization::rules());
+    rules.extend(generic_caches::rules());
+    rules.extend(orphan_detection::rules());
+    rules.extend(ds_store::rules());
+    rules.extend(empty_dirs::rules());
+    rules.extend(stale_project::rules());
     rules
 });
 
-/// Eagerly initialize all `LazyLock` caches on dedicated OS threads
-/// BEFORE dispatching rules to the rayon pool. This prevents rayon thread
-/// starvation where all pool threads block on a `LazyLock` while the one thread
-/// doing the initialization can't get pool workers for its own `par_iter()`.
-fn warm_caches() {
+/// Categories whose rules use the `PROJECT_INDEX` cache.
+const PROJECT_INDEX_CATEGORIES: &[Category] = &[
+    Category::BuildArtifact,
+    Category::InstalledDeps,
+    Category::StaleProject,
+];
+
+/// Categories whose rules use the `CLI_CACHE`.
+const CLI_CACHE_CATEGORIES: &[Category] = &[
+    Category::Docker,
+    Category::Toolchain,
+    Category::PackageCache,
+];
+
+/// Eagerly initialize `LazyLock` caches on dedicated OS threads,
+/// but only the caches that are actually needed for the requested categories.
+/// This prevents rayon thread starvation while avoiding unnecessary work.
+fn warm_caches_for(categories: &[Category]) {
+    let need_cli = categories
+        .iter()
+        .any(|c| CLI_CACHE_CATEGORIES.contains(c));
+    let need_project = categories
+        .iter()
+        .any(|c| PROJECT_INDEX_CATEGORIES.contains(c));
+
+    if !need_cli && !need_project {
+        return;
+    }
+
+    std::thread::scope(|s| {
+        if need_cli {
+            s.spawn(|| {
+                let _ = &*crate::scanner::cli_cache::CLI_CACHE;
+            });
+        }
+        if need_project {
+            s.spawn(|| {
+                let _ = &*crate::scanner::project_index::PROJECT_INDEX;
+            });
+        }
+    });
+}
+
+/// Warm all caches (used for full scan).
+fn warm_caches_all() {
     std::thread::scope(|s| {
         s.spawn(|| {
             let _ = &*crate::scanner::cli_cache::CLI_CACHE;
@@ -124,7 +186,7 @@ impl RuleEngine {
     pub fn scan_all(&self, config: &Config, progress: Option<&ScanProgress>) -> ScanResult {
         use rayon::prelude::*;
 
-        warm_caches();
+        warm_caches_all();
 
         let filtered_rules: Vec<_> = RULES
             .iter()
@@ -166,7 +228,7 @@ impl RuleEngine {
     pub fn scan_all_streaming(&self, config: &Config, tx: &mpsc::Sender<ScanUpdate>) {
         use rayon::prelude::*;
 
-        warm_caches();
+        warm_caches_all();
 
         let filtered_rules: Vec<_> = RULES
             .iter()
@@ -196,7 +258,7 @@ impl RuleEngine {
     ) -> ScanResult {
         use rayon::prelude::*;
 
-        warm_caches();
+        warm_caches_for(&[category]);
 
         let filtered_rules: Vec<_> = RULES
             .iter()

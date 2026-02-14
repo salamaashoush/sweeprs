@@ -7,10 +7,14 @@
 #![allow(non_camel_case_types)]
 #![allow(unsafe_code)]
 
+use std::cell::RefCell;
 use std::os::raw::c_void;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use rayon::prelude::*;
 
 // --- Constants from <sys/attr.h> ---
 const ATTR_BIT_MAP_COUNT: u16 = 5;
@@ -57,6 +61,12 @@ unsafe extern "C" {
     ) -> i32;
 }
 
+// Thread-local reusable buffer for `getattrlistbulk` syscalls.
+// Avoids allocating a fresh 256 KiB buffer per directory in recursive scans.
+thread_local! {
+    static SCAN_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0u8; BUF_SIZE]);
+}
+
 /// Compute total recursive file size under `path` using `getattrlistbulk`.
 pub fn dir_size_bulk(path: &Path) -> u64 {
     if !path.exists() {
@@ -68,7 +78,7 @@ pub fn dir_size_bulk(path: &Path) -> u64 {
     let root_dev = path.metadata().map(|m| m.dev()).unwrap_or(0);
     let mut total = 0u64;
     let mut seen_inodes = rustc_hash::FxHashSet::default();
-    scan_recursive(path, &mut total, None, &mut seen_inodes, root_dev);
+    scan_recursive(path, &mut total, None, &mut seen_inodes, root_dev, 0);
     total
 }
 
@@ -91,6 +101,7 @@ pub fn dir_size_and_count_bulk(path: &Path) -> (u64, usize) {
         Some(&mut count),
         &mut seen_inodes,
         root_dev,
+        0,
     );
     (total, count)
 }
@@ -102,6 +113,7 @@ fn scan_recursive(
     mut top_level_count: Option<&mut usize>,
     seen_inodes: &mut rustc_hash::FxHashSet<u64>,
     root_dev: u64,
+    depth: usize,
 ) {
     // Open directory using safe std::fs::File, then extract the raw fd.
     let Ok(dir_file) = std::fs::File::open(dir) else {
@@ -126,85 +138,102 @@ fn scan_recursive(
         forkattr: 0,
     };
 
-    let mut buf = vec![0u8; BUF_SIZE];
     let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
 
-    loop {
-        let ret = unsafe {
-            getattrlistbulk(
-                fd,
-                &raw mut al,
-                buf.as_mut_ptr().cast::<c_void>(),
-                buf.len(),
-                0,
-            )
-        };
+    SCAN_BUF.with(|cell| {
+        let mut buf = cell.borrow_mut();
 
-        if ret == 0 {
-            break;
-        }
-        if ret < 0 {
-            // APFS bug: ERANGE at end of directory, retry
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(ERANGE) {
-                continue;
+        loop {
+            let ret = unsafe {
+                getattrlistbulk(
+                    fd,
+                    &raw mut al,
+                    buf.as_mut_ptr().cast::<c_void>(),
+                    buf.len(),
+                    0,
+                )
+            };
+
+            if ret == 0 {
+                break;
             }
-            break;
-        }
-
-        let entry_count = ret as usize;
-        let mut offset = 0usize;
-
-        for _ in 0..entry_count {
-            if offset + 4 > buf.len() {
+            if ret < 0 {
+                // APFS bug: ERANGE at end of directory, retry
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(ERANGE) {
+                    continue;
+                }
                 break;
             }
 
-            let entry_len =
-                u32::from_ne_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
-            if entry_len == 0 || offset + entry_len > buf.len() {
-                break;
-            }
+            let entry_count = ret as usize;
+            let mut offset = 0usize;
 
-            let entry = &buf[offset..offset + entry_len];
-            let parsed = parse_entry(entry);
-
-            if let Some(ref mut c) = top_level_count.as_deref_mut() {
-                **c += 1;
-            }
-
-            match parsed {
-                ParsedEntry::File { size, inode, nlink } => {
-                    if nlink > 1 && !seen_inodes.insert(inode) {
-                        // Already counted this hard-linked file
-                        offset += entry_len;
-                        continue;
-                    }
-                    *total += size;
+            for _ in 0..entry_count {
+                if offset + 4 > buf.len() {
+                    break;
                 }
-                ParsedEntry::Dir { name, dev } => {
-                    // Skip directories on a different volume (mount points)
-                    if root_dev != 0 && dev != 0 && dev != root_dev {
-                        offset += entry_len;
-                        continue;
-                    }
-                    if !name.is_empty() {
-                        subdirs.push(dir.join(&name));
-                    }
-                }
-                ParsedEntry::Other | ParsedEntry::Error => {}
-            }
 
-            offset += entry_len;
+                let entry_len =
+                    u32::from_ne_bytes(buf[offset..offset + 4].try_into().unwrap()) as usize;
+                if entry_len == 0 || offset + entry_len > buf.len() {
+                    break;
+                }
+
+                let entry = &buf[offset..offset + entry_len];
+                let parsed = parse_entry(entry);
+
+                if let Some(ref mut c) = top_level_count.as_deref_mut() {
+                    **c += 1;
+                }
+
+                match parsed {
+                    ParsedEntry::File { size, inode, nlink } => {
+                        if nlink > 1 && !seen_inodes.insert(inode) {
+                            // Already counted this hard-linked file
+                            offset += entry_len;
+                            continue;
+                        }
+                        *total += size;
+                    }
+                    ParsedEntry::Dir { name, dev } => {
+                        // Skip directories on a different volume (mount points)
+                        if root_dev != 0 && dev != 0 && dev != root_dev {
+                            offset += entry_len;
+                            continue;
+                        }
+                        if !name.is_empty() {
+                            subdirs.push(dir.join(&name));
+                        }
+                    }
+                    ParsedEntry::Other | ParsedEntry::Error => {}
+                }
+
+                offset += entry_len;
+            }
         }
-    }
+    });
 
     // dir_file drops here, closing the fd.
     drop(dir_file);
 
     // Recurse into subdirectories (no top-level counting for children).
-    for subdir in &subdirs {
-        scan_recursive(subdir, total, None, seen_inodes, root_dev);
+    if depth == 0 && subdirs.len() >= 8 {
+        // Parallel scan at top level: each branch gets its own seen_inodes set
+        // and local subtotal. Minor hard-link over-counting across branches is
+        // acceptable for a disk cleanup tool.
+        let shared_total = AtomicU64::new(0);
+        subdirs.par_iter().for_each(|subdir| {
+            let mut local_total = 0u64;
+            let mut local_seen = rustc_hash::FxHashSet::default();
+            scan_recursive(subdir, &mut local_total, None, &mut local_seen, root_dev, depth + 1);
+            shared_total.fetch_add(local_total, Ordering::Relaxed);
+        });
+        *total += shared_total.load(Ordering::Relaxed);
+    } else {
+        for subdir in &subdirs {
+            scan_recursive(subdir, total, None, seen_inodes, root_dev, depth + 1);
+        }
     }
 }
 
@@ -250,10 +279,7 @@ fn parse_entry(entry: &[u8]) -> ParsedEntry {
         let name_start = pos.wrapping_add(data_offset as usize);
         if name_start < entry.len() {
             let name_bytes: &[u8] = &entry[name_start..];
-            let end = name_bytes
-                .iter()
-                .position(|&b| b == 0)
-                .unwrap_or(name_bytes.len());
+            let end = memchr::memchr(0, name_bytes).unwrap_or(name_bytes.len());
             name = String::from_utf8_lossy(&name_bytes[..end]).into_owned();
         }
         pos += 8;
