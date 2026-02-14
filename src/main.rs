@@ -2,7 +2,6 @@ mod cleaner;
 mod commands;
 mod config;
 mod filter;
-mod history;
 mod monitor;
 mod output;
 mod platform;
@@ -109,19 +108,10 @@ enum Command {
         #[arg(long)]
         path: bool,
     },
-    /// Show scan history and disk usage trends
-    History,
     /// List all scan categories
     Categories,
     /// Update sweeprs to the latest version
     Upgrade,
-    /// Compare two scan results (JSON files)
-    Diff {
-        /// First scan result file
-        before: String,
-        /// Second scan result file
-        after: String,
-    },
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for (auto-detected if omitted)
@@ -311,11 +301,6 @@ fn main() -> Result<()> {
                 eprintln!("Scan results saved to: {save_path}");
             }
 
-            // Auto-save to scan history (unless loading a previous scan)
-            if load.is_none() {
-                history::save_scan(&result);
-            }
-
             if json {
                 output::print_json(&result)?;
             } else {
@@ -362,7 +347,6 @@ fn main() -> Result<()> {
             };
 
             apply_filter(&mut result, &filters, &exclude, min_size, &config)?;
-            history::save_scan(&result);
             print_scan_summary(&result);
 
             // Resolve safety level: CLI --all overrides, then config default_clean_safety
@@ -420,9 +404,6 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Some(Command::History) => {
-            history::print_history();
-        }
         Some(Command::Categories) => {
             println!("{:<20} {:<10} CLI ARG", "CATEGORY", "SAFETY");
             println!("{}", "-".repeat(50));
@@ -449,12 +430,6 @@ fn main() -> Result<()> {
                 };
                 println!("{:<20} {:<10} {}", cat, cat.default_safety(), arg);
             }
-        }
-        Some(Command::Diff { before, after }) => {
-            commands::diff::diff_scans(
-                std::path::Path::new(&before),
-                std::path::Path::new(&after),
-            )?;
         }
         Some(Command::Upgrade) => commands::upgrade::execute()?,
         Some(Command::Completions { shell, install }) => {
