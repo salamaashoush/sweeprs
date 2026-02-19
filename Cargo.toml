@@ -23,7 +23,6 @@ memchr = "2"
 yansi = "1"
 humansize = "2"
 indicatif = { version = "0.18", features = ["rayon"] }
-mac-notification-sys = "0.6"
 dirs = "6"
 chrono = { version = "0.4", features = ["clock"] }
 sysinfo = "0.36"

@@ -5,6 +5,27 @@ use crate::scanner::cli_cache;
 use crate::scanner::entry::{DiskInfo, VolumeInfo};
 use crate::scanner::walker;
 
+/// Lightweight disk usage query for the monitor daemon.
+///
+/// Takes a pre-existing `&Disks` reference (caller owns it, refreshes it each cycle)
+/// and returns `(usage_percent, available_bytes)` for the root volume.
+/// No CLI commands are spawned -- avoids triggering `CLI_CACHE` or `get_purgeable_bytes`.
+pub fn get_disk_usage(disks: &Disks) -> Option<(f64, u64)> {
+    let root = disks
+        .iter()
+        .find(|d| d.mount_point() == std::path::Path::new("/"))?;
+
+    let total = root.total_space();
+    let available = root.available_space();
+    let used = total.saturating_sub(available);
+    let pct = if total > 0 {
+        (used as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    Some((pct, available))
+}
+
 /// Get disk info with all the expensive supplementary data (iCloud, system/app size, etc.)
 /// Used for full scans and TUI where the extra detail is displayed.
 pub fn get_disk_info() -> Result<DiskInfo> {

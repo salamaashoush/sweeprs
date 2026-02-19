@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use sysinfo::Disks;
+
 use crate::cleaner;
 use crate::config::Config;
 use crate::platform;
@@ -25,6 +27,12 @@ pub fn pid_file_path() -> PathBuf {
 }
 
 pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
+    // Cap rayon to 2 threads -- a background daemon should not saturate all cores
+    // if auto-clean triggers par_iter().
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build_global();
+
     let poll_interval = Duration::from_secs(config.monitor.poll_interval_secs);
     let warning_threshold = f64::from(config.monitor.warning_threshold_percent);
     let critical_threshold = f64::from(config.monitor.critical_threshold_percent);
@@ -33,29 +41,35 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
     let mut last_critical_at: Option<Instant> = None;
     let mut last_auto_clean_at: Option<Instant> = None;
 
+    // Reuse a single Disks instance across poll cycles instead of reallocating each time.
+    let mut disks = Disks::new_with_refreshed_list();
+
     loop {
         if shutdown.load(Ordering::Relaxed) {
             eprintln!("[sweeprs monitor] Shutting down.");
             break;
         }
 
-        match platform::get_disk_info_fast() {
-            Ok(info) => {
-                let pct = info.usage_percent;
-                let free = util::human_size(info.available_bytes);
+        disks.refresh(true);
+
+        match platform::get_disk_usage(&disks) {
+            Some((pct, available)) => {
+                let free = util::human_size(available);
 
                 if pct >= critical_threshold && should_notify(last_critical_at.as_ref()) {
-                    send_and_handle(
+                    notify::send_notification(
                         "sweeprs: Disk Critical!",
                         &format!(
-                            "Disk usage at {pct:.1}%! {free} free.",
+                            "Disk usage at {pct:.1}%! {free} free. Run `sweeprs clean` to reclaim space.",
                         ),
                     );
                     last_critical_at = Some(Instant::now());
                 } else if pct >= warning_threshold && should_notify(last_warning_at.as_ref()) {
-                    send_and_handle(
+                    notify::send_notification(
                         "sweeprs: Disk Warning",
-                        &format!("Disk usage at {pct:.1}%. {free} free."),
+                        &format!(
+                            "Disk usage at {pct:.1}%. {free} free. Run `sweeprs clean` to reclaim space.",
+                        ),
                     );
                     last_warning_at = Some(Instant::now());
                 }
@@ -72,8 +86,8 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
 
                 eprintln!("[sweeprs monitor] Disk: {pct:.1}% used, {free} free");
             }
-            Err(e) => {
-                eprintln!("[sweeprs monitor] Error checking disk: {e}");
+            None => {
+                eprintln!("[sweeprs monitor] Error checking disk: root volume not found");
             }
         }
 
@@ -83,7 +97,10 @@ pub fn run_loop(config: &Config, shutdown: &AtomicBool) {
             if shutdown.load(Ordering::Relaxed) {
                 break;
             }
-            std::thread::sleep(TICK.min(deadline - Instant::now()));
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            std::thread::sleep(TICK.min(remaining));
         }
     }
 }
@@ -136,47 +153,6 @@ fn run_auto_clean(config: &Config) {
     } else {
         eprintln!("[sweeprs monitor] Auto-clean complete");
     }
-}
-
-/// Send a notification on a background thread. If the user clicks "Clean Now",
-/// open a new Terminal window running `sweeprs clean` (dry-run by default)
-/// so the user can review what would be deleted and confirm interactively.
-fn send_and_handle(title: &str, message: &str) {
-    let title = title.to_owned();
-    let message = message.to_owned();
-    std::thread::spawn(move || {
-        match notify::send_warning(&title, &message) {
-            Ok(true) => {
-                eprintln!("[sweeprs monitor] User clicked Clean Now, opening terminal...");
-                let exe = std::env::current_exe().map_or_else(
-                    |_| "sweeprs".to_owned(),
-                    |p| p.display().to_string(),
-                );
-                // Open a new Terminal.app window with `sweeprs clean` (dry-run, user confirms)
-                let script = format!(
-                    "tell application \"Terminal\"\n\
-                         activate\n\
-                         do script \"{exe} clean\"\n\
-                     end tell"
-                );
-                let result = std::process::Command::new("osascript")
-                    .args(["-e", &script])
-                    .status();
-                match result {
-                    Ok(status) => {
-                        eprintln!("[sweeprs monitor] Opened Terminal (exit: {status})");
-                    }
-                    Err(e) => {
-                        eprintln!("[sweeprs monitor] Failed to open Terminal: {e}");
-                    }
-                }
-            }
-            Ok(false) => {}
-            Err(e) => {
-                eprintln!("[sweeprs monitor] Notification error: {e}");
-            }
-        }
-    });
 }
 
 fn should_notify(last: Option<&Instant>) -> bool {
