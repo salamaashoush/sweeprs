@@ -114,6 +114,9 @@ pub fn run() -> Result<()> {
 
         match events.next()? {
             Event::Key(key) => app.handle_key(key),
+            Event::Resize => {
+                app.needs_redraw = true;
+            }
             Event::Tick => {}
         }
     }

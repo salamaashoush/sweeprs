@@ -5,6 +5,7 @@ use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
 
 pub enum Event {
     Key(KeyEvent),
+    Resize,
     Tick,
 }
 
@@ -23,6 +24,7 @@ impl EventHandler {
         if event::poll(self.tick_rate)? {
             match event::read()? {
                 CrosstermEvent::Key(key) => Ok(Event::Key(key)),
+                CrosstermEvent::Resize(..) => Ok(Event::Resize),
                 _ => Ok(Event::Tick),
             }
         } else {

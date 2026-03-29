@@ -258,14 +258,24 @@ impl Tree {
         self.ensure_check_states();
     }
 
-    /// Read cached category check state (must call `ensure_check_cache` first).
+    /// Read cached category check state. Falls back to computing on the fly
+    /// if the cache hasn't been primed via `ensure_check_cache`.
     pub fn cached_category_check_state(&self, ci: usize) -> CheckState {
-        self.cached_check_states.as_ref().unwrap()[ci].0
+        if let Some(ref states) = self.cached_check_states {
+            return states[ci].0;
+        }
+        let cat = &self.categories[ci];
+        let group_states: Vec<CheckState> = cat.groups.iter().map(compute_group_check_state).collect();
+        compute_category_check_state_from_groups(&group_states, cat)
     }
 
-    /// Read cached group check state (must call `ensure_check_cache` first).
+    /// Read cached group check state. Falls back to computing on the fly
+    /// if the cache hasn't been primed via `ensure_check_cache`.
     pub fn cached_group_check_state(&self, ci: usize, gi: usize) -> CheckState {
-        self.cached_check_states.as_ref().unwrap()[ci].1[gi]
+        if let Some(ref states) = self.cached_check_states {
+            return states[ci].1[gi];
+        }
+        compute_group_check_state(&self.categories[ci].groups[gi])
     }
 
     pub fn toggle(&mut self, row: RowRef) {

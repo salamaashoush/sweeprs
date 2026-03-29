@@ -198,12 +198,19 @@ impl App {
                 if let Some(&row) = visible.get(self.cursor) {
                     if self.tree.is_expanded(row) {
                         // Already expanded: move to first child
-                        if self.cursor + 1 < max {
+                        let new_max = self.tree.visible_rows().len();
+                        if self.cursor + 1 < new_max {
                             self.cursor += 1;
                             self.clamp_scroll();
                         }
                     } else {
                         self.tree.expand(row);
+                        // After expanding, move to first child
+                        let new_max = self.tree.visible_rows().len();
+                        if self.cursor + 1 < new_max {
+                            self.cursor += 1;
+                            self.clamp_scroll();
+                        }
                     }
                 }
             }
