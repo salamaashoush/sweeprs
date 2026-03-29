@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -11,6 +11,44 @@ use yansi::Paint;
 use crate::rules::{brew, docker};
 use crate::scanner::entry::{SafetyLevel, ScannedEntry};
 use crate::util;
+
+/// Remove a directory tree, handling common edge cases:
+/// - Read-only files/dirs (Go modules, node_modules/.cache): chmod before retry
+/// - Dirs recreated by running apps (Chrome cache): retry once after short delay
+fn remove_dir_robust(path: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            // Go modules and some caches have read-only dirs. Make writable and retry.
+            fix_permissions(path);
+            std::fs::remove_dir_all(path)
+        }
+        Err(e) if e.raw_os_error() == Some(66) /* ENOTEMPTY on macOS */ => {
+            // Race: an app (e.g. Chrome) recreated files during deletion. Retry once.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::fs::remove_dir_all(path)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Recursively make a directory tree writable so it can be deleted.
+fn fix_permissions(path: &Path) {
+    let walker = ignore::WalkBuilder::new(path)
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(false)
+        .build();
+    for entry in walker.flatten() {
+        let p = entry.path();
+        if let Ok(meta) = p.metadata() {
+            let mut perms = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(p, perms);
+        }
+    }
+}
 
 pub struct CleanOptions {
     pub dry_run: bool,
@@ -157,7 +195,7 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
         } else if path_str.starts_with("brew:") {
             brew::clean_brew_entry(&path_str)
         } else if entry.path.is_dir() {
-            std::fs::remove_dir_all(&entry.path)
+            remove_dir_robust(&entry.path)
         } else if entry.path.is_file() {
             std::fs::remove_file(&entry.path)
         } else {

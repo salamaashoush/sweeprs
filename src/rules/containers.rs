@@ -168,55 +168,17 @@ impl CleanupRule for ColimaRule {
         }
 
         let mut entries = Vec::new();
-
-        // Scan VM instances inside ~/.colima/_lima/
-        // Layout: ~/.colima/_lima/<instance>/{diffdisk,basedisk,...}
         let lima_dir = colima_dir.join("_lima");
+
         if lima_dir.exists() {
-            if let Ok(read_dir) = std::fs::read_dir(&lima_dir) {
-                for entry in read_dir.flatten() {
-                    let path = entry.path();
-                    if !path.is_dir() {
-                        continue;
-                    }
-                    let name = entry.file_name();
-                    let name_str = name.to_string_lossy().to_string();
+            // Scan active VM instances: ~/.colima/_lima/<instance>/
+            // These contain the VM config, disk, serial logs, etc.
+            self.scan_instances(&lima_dir, &mut entries);
 
-                    // Skip internal Lima dirs (_config, _disks, _networks, etc.)
-                    if name_str.starts_with('_') {
-                        continue;
-                    }
-
-                    // Report diffdisk separately -- it's the writable layer and typically largest
-                    let diffdisk = path.join("diffdisk");
-                    if diffdisk.exists() {
-                        let dd_size = file_size(&diffdisk);
-                        if dd_size > 0 {
-                            entries.push(ScannedEntry {
-                                path: diffdisk,
-                                size: dd_size,
-                                category: Category::Docker,
-                                safety: SafetyLevel::Caution,
-                                description: format!("Colima VM disk: {name_str}"),
-                                item_count: None,
-                            });
-                        }
-                    }
-
-                    // Report rest of instance (basedisk, cidata, logs, config)
-                    let rest = shallow_dir_size(&path, &["diffdisk"]);
-                    if rest > 0 {
-                        entries.push(ScannedEntry {
-                            path,
-                            size: rest,
-                            category: Category::Docker,
-                            safety: SafetyLevel::Caution,
-                            description: format!("Colima VM base: {name_str}"),
-                            item_count: None,
-                        });
-                    }
-                }
-            }
+            // Scan shared disks: ~/.colima/_lima/_disks/<instance>/
+            // Colima stores per-instance datadisks here (often 60GB+ each).
+            // Stale instances leave orphaned datadisks behind.
+            self.scan_disks(&lima_dir, &mut entries);
         }
 
         // Report top-level Colima dirs/files outside _lima
@@ -251,6 +213,96 @@ impl CleanupRule for ColimaRule {
     }
 }
 
+impl ColimaRule {
+    /// Scan VM instance directories under `~/.colima/_lima/<instance>/`.
+    /// Each instance contains: disk, serial*.log, cidata.iso, ga.sock, ha.sock, etc.
+    fn scan_instances(&self, lima_dir: &Path, entries: &mut Vec<ScannedEntry>) {
+        let Ok(read_dir) = std::fs::read_dir(lima_dir) else {
+            return;
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().to_string();
+
+            // Skip internal Lima dirs (_config, _disks, _networks, etc.)
+            // _disks is handled separately in scan_disks()
+            if name_str.starts_with('_') {
+                continue;
+            }
+
+            let size = vm_instance_size(&path);
+            if size > 0 {
+                entries.push(ScannedEntry {
+                    path,
+                    size,
+                    category: Category::Docker,
+                    safety: SafetyLevel::Caution,
+                    description: format!("Colima VM: {name_str}"),
+                    item_count: None,
+                });
+            }
+        }
+    }
+
+    /// Scan shared disk storage under `~/.colima/_lima/_disks/`.
+    /// Layout: _disks/<instance-name>/datadisk
+    ///
+    /// Each instance gets a `datadisk` file here (typically 60GB virtual, 1-10GB actual).
+    /// When Colima instances are deleted, these datadisks can be left behind as orphans.
+    /// Detects orphaned disks by checking if the corresponding instance dir still exists.
+    fn scan_disks(&self, lima_dir: &Path, entries: &mut Vec<ScannedEntry>) {
+        let disks_dir = lima_dir.join("_disks");
+        let Ok(read_dir) = std::fs::read_dir(&disks_dir) else {
+            return;
+        };
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().to_string();
+
+            // Check if the corresponding instance still exists
+            let instance_dir = lima_dir.join(&name_str);
+            let is_orphaned = !instance_dir.exists();
+
+            // Sum all disk image files in this instance's disk dir
+            let size = disk_dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+
+            if is_orphaned {
+                entries.push(ScannedEntry {
+                    path,
+                    size,
+                    category: Category::Docker,
+                    safety: SafetyLevel::Safe,
+                    description: format!(
+                        "Orphaned Colima disk: {name_str} (instance deleted, disk remains)"
+                    ),
+                    item_count: None,
+                });
+            } else {
+                entries.push(ScannedEntry {
+                    path,
+                    size,
+                    category: Category::Docker,
+                    safety: SafetyLevel::Caution,
+                    description: format!("Colima disk: {name_str}"),
+                    item_count: None,
+                });
+            }
+        }
+    }
+}
+
 /// Get size of a single file via metadata (no recursive walk).
 fn file_size(path: &Path) -> u64 {
     path.metadata().map(|m| m.len()).unwrap_or(0)
@@ -281,10 +333,31 @@ fn shallow_dir_size(dir: &Path, exclude: &[&str]) -> u64 {
     total
 }
 
+/// Sum sizes of disk image files in a Colima _disks/<instance>/ directory.
+/// Handles both old format (diffdisk/basedisk) and new format (datadisk).
+fn disk_dir_size(dir: &Path) -> u64 {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for entry in read_dir.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_file() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
 /// Estimate VM instance size by summing known large files.
+/// Covers both old Colima format (diffdisk/basedisk) and new format (disk/datadisk).
 /// Much faster than walking the entire directory tree.
 fn vm_instance_size(instance_dir: &Path) -> u64 {
-    let known_files = ["diffdisk", "basedisk", "cidata.iso"];
+    let known_files = [
+        "diffdisk", "basedisk", "cidata.iso", // old Colima / Lima format
+        "disk", "datadisk", // new Colima format
+    ];
     let mut total = 0u64;
     for name in &known_files {
         let p = instance_dir.join(name);
