@@ -11,6 +11,7 @@ use crate::scanner::entry::{ScanResult, ScannedEntry};
 use crate::tui::tree::{RowRef, Tree};
 use crate::tui::views::View;
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct App {
     pub running: bool,
     pub view: View,
@@ -27,6 +28,8 @@ pub struct App {
     pub last_rule_name: String,
     pub search_query: String,
     pub search_active: bool,
+    /// Set to true when anything changes that requires a redraw.
+    pub needs_redraw: bool,
 }
 
 impl App {
@@ -47,6 +50,7 @@ impl App {
             last_rule_name: String::new(),
             search_query: String::new(),
             search_active: false,
+            needs_redraw: true,
         }
     }
 
@@ -59,6 +63,7 @@ impl App {
         self.scan_rules_done = 0;
         self.scan_rules_total = 0;
         self.last_rule_name.clear();
+        self.needs_redraw = true;
 
         let (tx, rx) = mpsc::channel();
         self.scan_receiver = Some(rx);
@@ -107,6 +112,7 @@ impl App {
 
         if got_updates || finished {
             self.rebuild_tree();
+            self.needs_redraw = true;
         }
     }
 
@@ -115,7 +121,8 @@ impl App {
         if self.search_active {
             self.tree.apply_search_filter(&self.search_query);
         }
-        let visible_count = self.tree.visible_rows().len();
+        let visible = self.tree.visible_rows();
+        let visible_count = visible.len();
         if visible_count == 0 {
             self.cursor = 0;
         } else if self.cursor >= visible_count {
@@ -144,6 +151,8 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        self.needs_redraw = true;
+
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.running = false;
             return;

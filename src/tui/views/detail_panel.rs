@@ -10,7 +10,7 @@ use crate::tui::theme;
 use crate::tui::tree::RowRef;
 use crate::util;
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .title(" Details ")
         .borders(Borders::ALL)

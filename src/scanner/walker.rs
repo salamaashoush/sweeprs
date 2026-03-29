@@ -37,12 +37,14 @@ pub fn dir_size_and_count(path: &Path) -> (u64, usize) {
 fn dir_size_fallback(path: &Path) -> u64 {
     use std::os::unix::fs::MetadataExt;
 
-    if !path.exists() {
-        return 0;
-    }
+    // Single metadata() call instead of exists() + is_file() + metadata()
+    let meta = match path.metadata() {
+        Ok(m) => m,
+        Err(_) => return 0,
+    };
 
-    if path.is_file() {
-        return path.metadata().map(|m| m.blocks() * 512).unwrap_or(0);
+    if meta.is_file() {
+        return meta.blocks() * 512;
     }
 
     let walker = ignore::WalkBuilder::new(path)
@@ -80,13 +82,14 @@ fn dir_size_fallback(path: &Path) -> u64 {
 fn dir_size_and_count_fallback(path: &Path) -> (u64, usize) {
     use std::os::unix::fs::MetadataExt;
 
-    if !path.exists() {
-        return (0, 0);
-    }
+    // Single metadata() call instead of exists() + is_file() + metadata()
+    let meta = match path.metadata() {
+        Ok(m) => m,
+        Err(_) => return (0, 0),
+    };
 
-    if path.is_file() {
-        let size = path.metadata().map(|m| m.blocks() * 512).unwrap_or(0);
-        return (size, 1);
+    if meta.is_file() {
+        return (meta.blocks() * 512, 1);
     }
 
     let walker = ignore::WalkBuilder::new(path)

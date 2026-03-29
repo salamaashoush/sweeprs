@@ -26,7 +26,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
 
     app.clamp_scroll_to_viewport(viewport_height);
 
+    // Compute all mutable-access data upfront, then borrow tree immutably for rendering.
     let visible = app.tree.visible_rows();
+    let total_reclaimable = app.tree.total_reclaimable();
+
     if visible.is_empty() {
         let empty = Paragraph::new("No items found. Press 'r' to scan.")
             .style(Style::default().fg(theme::DIM));
@@ -34,10 +37,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let total_reclaimable = app.tree.total_reclaimable();
-
+    // Pre-compute check states for all visible categories and groups in this window.
     let end = (app.scroll_offset + viewport_height).min(visible.len());
     let window = &visible[app.scroll_offset..end];
+
+    // Ensure check states are cached before we borrow tree immutably.
+    app.tree.ensure_check_cache();
 
     let lines: Vec<Line<'_>> = window
         .iter()
@@ -91,7 +96,7 @@ fn render_category_row(
 ) -> Line<'static> {
     let cat = &tree.categories[ci];
     let arrow = if cat.expanded { "v" } else { ">" };
-    let check = match tree.category_check_state(ci) {
+    let check = match tree.cached_category_check_state(ci) {
         CheckState::Checked => "[x]",
         CheckState::Partial => "[-]",
         CheckState::Unchecked => "[ ]",
@@ -141,7 +146,7 @@ fn render_group_row(
     let cat = &tree.categories[ci];
     let group = &cat.groups[gi];
     let arrow = if group.expanded { "v" } else { ">" };
-    let check = match tree.group_check_state(ci, gi) {
+    let check = match tree.cached_group_check_state(ci, gi) {
         CheckState::Checked => "[x]",
         CheckState::Partial => "[-]",
         CheckState::Unchecked => "[ ]",

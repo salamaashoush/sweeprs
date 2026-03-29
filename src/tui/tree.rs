@@ -1,5 +1,5 @@
-use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use indexmap::IndexMap;
 
@@ -37,11 +37,20 @@ pub struct EntryNode {
     pub description: String,
     pub item_count: Option<usize>,
     pub checked: bool,
+    /// Pre-lowercased "path + description" for fast search filtering.
+    search_text: String,
 }
 
 pub struct Tree {
     pub categories: Vec<CategoryNode>,
-    cached_rows: RefCell<Option<Vec<RowRef>>>,
+    /// Cached visible rows, shared via Rc to avoid cloning on every access.
+    cached_rows: Option<Rc<Vec<RowRef>>>,
+    /// Cached check states per category: `(category_check, group_checks)`.
+    cached_check_states: Option<Vec<(CheckState, Vec<CheckState>)>>,
+    /// Cached selection summary: `(count, total_bytes)`.
+    cached_selection: Option<(usize, u64)>,
+    /// Cached total reclaimable bytes.
+    cached_total_reclaimable: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,13 +91,32 @@ impl Tree {
 
                         let mut entry_nodes: Vec<EntryNode> = group_entries
                             .into_iter()
-                            .map(|e| EntryNode {
-                                path: e.path.clone(),
-                                size: e.size,
-                                safety: e.safety,
-                                description: e.description.clone(),
-                                item_count: e.item_count,
-                                checked: false,
+                            .map(|e| {
+                                // Pre-compute lowercased search text once at build time
+                                let path_str = e.path.display().to_string();
+                                let mut search_text = String::with_capacity(
+                                    path_str.len() + 1 + e.description.len(),
+                                );
+                                for c in path_str.chars() {
+                                    for lc in c.to_lowercase() {
+                                        search_text.push(lc);
+                                    }
+                                }
+                                search_text.push('\0');
+                                for c in e.description.chars() {
+                                    for lc in c.to_lowercase() {
+                                        search_text.push(lc);
+                                    }
+                                }
+                                EntryNode {
+                                    path: e.path.clone(),
+                                    size: e.size,
+                                    safety: e.safety,
+                                    description: e.description.clone(),
+                                    item_count: e.item_count,
+                                    checked: false,
+                                    search_text,
+                                }
                             })
                             .collect();
                         entry_nodes.sort_by(|a, b| b.size.cmp(&a.size));
@@ -121,12 +149,21 @@ impl Tree {
 
         Self {
             categories,
-            cached_rows: RefCell::new(None),
+            cached_rows: None,
+            cached_check_states: None,
+            cached_selection: None,
+            cached_total_reclaimable: None,
         }
     }
 
+    /// Invalidate check-state and selection caches (not layout).
+    fn invalidate_checks(&mut self) {
+        self.cached_check_states = None;
+        self.cached_selection = None;
+    }
+
     pub fn apply_search_filter(&mut self, query: &str) {
-        *self.cached_rows.borrow_mut() = None;
+        self.cached_rows = None;
         if query.is_empty() {
             for cat in &mut self.categories {
                 cat.hidden = false;
@@ -140,28 +177,36 @@ impl Tree {
         for cat in &mut self.categories {
             let mut any_visible = false;
             for group in &mut cat.groups {
-                let matches = group.entries.iter().any(|e| {
-                    e.path.display().to_string().to_lowercase().contains(&query)
-                        || e.description.to_lowercase().contains(&query)
-                });
+                let matches = group
+                    .entries
+                    .iter()
+                    .any(|e| e.search_text.contains(&*query));
                 group.hidden = !matches;
-                if matches { any_visible = true; }
+                if matches {
+                    any_visible = true;
+                }
             }
             cat.hidden = !any_visible;
         }
     }
 
-    pub fn visible_rows(&self) -> Vec<RowRef> {
-        if let Some(ref cached) = *self.cached_rows.borrow() {
-            return cached.clone();
+    /// Returns a shared reference to visible rows. Callers share the same Rc
+    /// instead of cloning the Vec on every access.
+    pub fn visible_rows(&mut self) -> Rc<Vec<RowRef>> {
+        if let Some(ref cached) = self.cached_rows {
+            return Rc::clone(cached);
         }
         let mut rows = Vec::new();
         for (ci, cat) in self.categories.iter().enumerate() {
-            if cat.hidden { continue; }
+            if cat.hidden {
+                continue;
+            }
             rows.push(RowRef::Category(ci));
             if cat.expanded {
                 for (gi, group) in cat.groups.iter().enumerate() {
-                    if group.hidden { continue; }
+                    if group.hidden {
+                        continue;
+                    }
                     rows.push(RowRef::Group(ci, gi));
                     if group.expanded {
                         for ei in 0..group.entries.len() {
@@ -171,56 +216,59 @@ impl Tree {
                 }
             }
         }
-        *self.cached_rows.borrow_mut() = Some(rows.clone());
-        rows
+        let rc = Rc::new(rows);
+        self.cached_rows = Some(Rc::clone(&rc));
+        rc
     }
 
-    pub fn category_check_state(&self, ci: usize) -> CheckState {
-        let cat = &self.categories[ci];
-        let mut any_checked = false;
-        let mut any_unchecked = false;
-        for group in &cat.groups {
-            for entry in &group.entries {
-                if entry.checked {
-                    any_checked = true;
-                } else {
-                    any_unchecked = true;
-                }
-                if any_checked && any_unchecked {
-                    return CheckState::Partial;
-                }
-            }
+    /// Ensure check state cache is populated, then return a reference.
+    fn ensure_check_states(&mut self) {
+        if self.cached_check_states.is_some() {
+            return;
         }
-        if any_checked {
-            CheckState::Checked
-        } else {
-            CheckState::Unchecked
-        }
+        let states: Vec<(CheckState, Vec<CheckState>)> = self
+            .categories
+            .iter()
+            .map(|cat| {
+                let group_states: Vec<CheckState> = cat
+                    .groups
+                    .iter()
+                    .map(compute_group_check_state)
+                    .collect();
+                let cat_state = compute_category_check_state_from_groups(&group_states, cat);
+                (cat_state, group_states)
+            })
+            .collect();
+        self.cached_check_states = Some(states);
     }
 
-    pub fn group_check_state(&self, ci: usize, gi: usize) -> CheckState {
-        let group = &self.categories[ci].groups[gi];
-        let mut any_checked = false;
-        let mut any_unchecked = false;
-        for entry in &group.entries {
-            if entry.checked {
-                any_checked = true;
-            } else {
-                any_unchecked = true;
-            }
-            if any_checked && any_unchecked {
-                return CheckState::Partial;
-            }
-        }
-        if any_checked {
-            CheckState::Checked
-        } else {
-            CheckState::Unchecked
-        }
+    pub fn category_check_state(&mut self, ci: usize) -> CheckState {
+        self.ensure_check_states();
+        self.cached_check_states.as_ref().unwrap()[ci].0
+    }
+
+    pub fn group_check_state(&mut self, ci: usize, gi: usize) -> CheckState {
+        self.ensure_check_states();
+        self.cached_check_states.as_ref().unwrap()[ci].1[gi]
+    }
+
+    /// Populate check state cache if needed. Call before borrowing tree immutably
+    /// for rendering (so that `cached_*_check_state` can use `&self`).
+    pub fn ensure_check_cache(&mut self) {
+        self.ensure_check_states();
+    }
+
+    /// Read cached category check state (must call `ensure_check_cache` first).
+    pub fn cached_category_check_state(&self, ci: usize) -> CheckState {
+        self.cached_check_states.as_ref().unwrap()[ci].0
+    }
+
+    /// Read cached group check state (must call `ensure_check_cache` first).
+    pub fn cached_group_check_state(&self, ci: usize, gi: usize) -> CheckState {
+        self.cached_check_states.as_ref().unwrap()[ci].1[gi]
     }
 
     pub fn toggle(&mut self, row: RowRef) {
-        *self.cached_rows.borrow_mut() = None;
         match row {
             RowRef::Category(ci) => {
                 let new_state = self.category_check_state(ci) != CheckState::Checked;
@@ -241,10 +289,11 @@ impl Tree {
                 entry.checked = !entry.checked;
             }
         }
+        self.invalidate_checks();
     }
 
     pub fn expand(&mut self, row: RowRef) {
-        *self.cached_rows.borrow_mut() = None;
+        self.cached_rows = None;
         match row {
             RowRef::Category(ci) => self.categories[ci].expanded = true,
             RowRef::Group(ci, gi) => self.categories[ci].groups[gi].expanded = true,
@@ -253,7 +302,7 @@ impl Tree {
     }
 
     pub fn collapse(&mut self, row: RowRef) {
-        *self.cached_rows.borrow_mut() = None;
+        self.cached_rows = None;
         match row {
             RowRef::Category(ci) => self.categories[ci].expanded = false,
             RowRef::Group(ci, gi) => self.categories[ci].groups[gi].expanded = false,
@@ -298,7 +347,10 @@ impl Tree {
         result
     }
 
-    pub fn selection_summary(&self) -> (usize, u64) {
+    pub fn selection_summary(&mut self) -> (usize, u64) {
+        if let Some(cached) = self.cached_selection {
+            return cached;
+        }
         let mut count = 0;
         let mut total = 0;
         for cat in &self.categories {
@@ -311,10 +363,63 @@ impl Tree {
                 }
             }
         }
-        (count, total)
+        let result = (count, total);
+        self.cached_selection = Some(result);
+        result
     }
 
-    pub fn total_reclaimable(&self) -> u64 {
-        self.categories.iter().map(|c| c.total_size).sum()
+    pub fn total_reclaimable(&mut self) -> u64 {
+        if let Some(cached) = self.cached_total_reclaimable {
+            return cached;
+        }
+        let total = self.categories.iter().map(|c| c.total_size).sum();
+        self.cached_total_reclaimable = Some(total);
+        total
+    }
+}
+
+fn compute_group_check_state(group: &GroupNode) -> CheckState {
+    let mut any_checked = false;
+    let mut any_unchecked = false;
+    for entry in &group.entries {
+        if entry.checked {
+            any_checked = true;
+        } else {
+            any_unchecked = true;
+        }
+        if any_checked && any_unchecked {
+            return CheckState::Partial;
+        }
+    }
+    if any_checked {
+        CheckState::Checked
+    } else {
+        CheckState::Unchecked
+    }
+}
+
+fn compute_category_check_state_from_groups(
+    group_states: &[CheckState],
+    cat: &CategoryNode,
+) -> CheckState {
+    if cat.groups.is_empty() {
+        return CheckState::Unchecked;
+    }
+    let mut any_checked = false;
+    let mut any_unchecked = false;
+    for &state in group_states {
+        match state {
+            CheckState::Partial => return CheckState::Partial,
+            CheckState::Checked => any_checked = true,
+            CheckState::Unchecked => any_unchecked = true,
+        }
+        if any_checked && any_unchecked {
+            return CheckState::Partial;
+        }
+    }
+    if any_checked {
+        CheckState::Checked
+    } else {
+        CheckState::Unchecked
     }
 }

@@ -69,13 +69,14 @@ thread_local! {
 
 /// Compute total recursive file size under `path` using `getattrlistbulk`.
 pub fn dir_size_bulk(path: &Path) -> u64 {
-    if !path.exists() {
+    // Single metadata() call instead of exists() + is_file() + metadata()
+    let Ok(meta) = path.metadata() else {
         return 0;
+    };
+    if meta.is_file() {
+        return meta.len();
     }
-    if path.is_file() {
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    let root_dev = path.metadata().map(|m| m.dev()).unwrap_or(0);
+    let root_dev = meta.dev();
     let mut total = 0u64;
     let mut seen_inodes = rustc_hash::FxHashSet::default();
     scan_recursive(path, &mut total, None, &mut seen_inodes, root_dev, 0);
@@ -84,14 +85,14 @@ pub fn dir_size_bulk(path: &Path) -> u64 {
 
 /// Compute total recursive file size AND top-level item count using `getattrlistbulk`.
 pub fn dir_size_and_count_bulk(path: &Path) -> (u64, usize) {
-    if !path.exists() {
+    // Single metadata() call instead of exists() + is_file() + metadata()
+    let Ok(meta) = path.metadata() else {
         return (0, 0);
+    };
+    if meta.is_file() {
+        return (meta.len(), 1);
     }
-    if path.is_file() {
-        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
-        return (size, 1);
-    }
-    let root_dev = path.metadata().map(|m| m.dev()).unwrap_or(0);
+    let root_dev = meta.dev();
     let mut total = 0u64;
     let mut count = 0usize;
     let mut seen_inodes = rustc_hash::FxHashSet::default();

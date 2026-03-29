@@ -8,7 +8,7 @@ use crate::tui::app::App;
 use crate::tui::theme;
 use crate::util;
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let (sel_count, sel_size) = app.tree.selection_summary();
     let total = app.tree.total_reclaimable();
 

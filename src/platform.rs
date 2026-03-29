@@ -64,7 +64,7 @@ fn get_disk_info_inner(full: bool) -> Result<DiskInfo> {
         (
             get_icloud_local_bytes(),
             get_system_app_bytes(),
-            get_other_volumes(),
+            get_other_volumes_from(&disks),
             get_tm_reclaimable_bytes(),
         )
     } else {
@@ -214,9 +214,8 @@ fn parse_plist_integer(xml: &str, key: &str) -> Option<u64> {
         .ok()
 }
 
-/// Query non-root mounted volumes via `sysinfo::Disks`.
-fn get_other_volumes() -> Vec<VolumeInfo> {
-    let disks = Disks::new_with_refreshed_list();
+/// Query non-root mounted volumes from an already-refreshed `Disks` instance.
+fn get_other_volumes_from(disks: &Disks) -> Vec<VolumeInfo> {
     disks
         .iter()
         .filter(|d| d.mount_point() != std::path::Path::new("/"))
