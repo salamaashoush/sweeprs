@@ -143,7 +143,6 @@ pub fn scan_categories_with_progress(
     config: &Config,
     categories: &[Category],
 ) -> Result<ScanResult> {
-    use rayon::prelude::*;
     configure_thread_pool(config);
     let progress = Arc::new(ScanProgress::new());
     let spinner = new_scan_spinner();
@@ -151,24 +150,14 @@ pub fn scan_categories_with_progress(
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-
-    let partials: Vec<entry::ScanResult> = categories
-        .par_iter()
-        .map(|cat| engine.scan_category(*cat, config, Some(&progress)))
-        .collect();
-
-    let mut combined = entry::ScanResult::default();
-    for partial in partials {
-        combined.entries.extend(partial.entries);
-        combined.total_size += partial.total_size;
-    }
-    combined.scan_duration_secs = Some(start.elapsed().as_secs_f64());
+    let mut result = engine.scan_categories(categories, config, Some(&progress));
+    result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
 
     let _ = tick_handle.join();
     spinner.finish_and_clear();
 
-    combined.disk_info = Some(platform::get_disk_info_fast()?);
-    Ok(combined)
+    result.disk_info = Some(platform::get_disk_info_fast()?);
+    Ok(result)
 }
 
 pub fn scan_category_with_progress(config: &Config, category: Category) -> Result<ScanResult> {

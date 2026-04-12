@@ -257,6 +257,57 @@ impl RuleEngine {
             });
     }
 
+    pub fn scan_categories(
+        &self,
+        categories: &[Category],
+        config: &Config,
+        progress: Option<&ScanProgress>,
+    ) -> ScanResult {
+        use rayon::prelude::*;
+
+        warm_caches_for(categories);
+
+        if let Some(p) = progress {
+            p.phase.store(1, Ordering::Relaxed);
+        }
+
+        let filtered_rules: Vec<_> = RULES
+            .iter()
+            .filter(|rule| categories.contains(&rule.category()))
+            .collect();
+
+        if let Some(p) = progress {
+            p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
+        }
+
+        let entries: Vec<ScannedEntry> = filtered_rules
+            .par_iter()
+            .flat_map(|rule| {
+                if let Some(p) = progress {
+                    if let Ok(mut name) = p.current_rule.lock() {
+                        *name = rule.name().to_string();
+                    }
+                }
+                let found = rule.scan(config);
+                if let Some(p) = progress {
+                    let rule_bytes: u64 = found.iter().map(|e| e.size).sum();
+                    p.bytes_found.fetch_add(rule_bytes, Ordering::Relaxed);
+                    p.items_found.fetch_add(found.len(), Ordering::Relaxed);
+                    p.rules_done.fetch_add(1, Ordering::Relaxed);
+                }
+                found
+            })
+            .collect();
+
+        let total_size = entries.iter().map(|e| e.size).sum();
+        ScanResult {
+            entries,
+            total_size,
+            disk_info: None,
+            scan_duration_secs: None,
+        }
+    }
+
     pub fn scan_category(
         &self,
         category: Category,

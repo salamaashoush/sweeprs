@@ -144,6 +144,85 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
     Ok(())
 }
 
+fn print_safety_breakdown(
+    filtered: &[&ScannedEntry],
+    all_entries: &[ScannedEntry],
+    include_unsafe: bool,
+) {
+    let safe_size: u64 = filtered
+        .iter()
+        .filter(|e| e.safety == SafetyLevel::Safe)
+        .map(|e| e.size)
+        .sum();
+    let safe_count = filtered
+        .iter()
+        .filter(|e| e.safety == SafetyLevel::Safe)
+        .count();
+    let caution_size: u64 = filtered
+        .iter()
+        .filter(|e| e.safety == SafetyLevel::Caution)
+        .map(|e| e.size)
+        .sum();
+    let caution_count = filtered
+        .iter()
+        .filter(|e| e.safety == SafetyLevel::Caution)
+        .count();
+    let danger_size: u64 = filtered
+        .iter()
+        .filter(|e| e.safety == SafetyLevel::Danger)
+        .map(|e| e.size)
+        .sum();
+    let danger_count = filtered
+        .iter()
+        .filter(|e| e.safety == SafetyLevel::Danger)
+        .count();
+
+    if safe_count > 0 {
+        println!(
+            "  {} {} ({} items)",
+            "[Safe]".green(),
+            util::human_size(safe_size),
+            safe_count
+        );
+    }
+    if caution_count > 0 {
+        println!(
+            "  {} {} ({} items)",
+            "[Caution]".yellow(),
+            util::human_size(caution_size),
+            caution_count
+        );
+    }
+    if danger_count > 0 {
+        println!(
+            "  {} {} ({} items)",
+            "[Danger]".red(),
+            util::human_size(danger_size),
+            danger_count
+        );
+    }
+
+    if !include_unsafe {
+        let unsafe_count = all_entries
+            .iter()
+            .filter(|e| e.safety != SafetyLevel::Safe && e.safety != SafetyLevel::Error)
+            .count();
+        if unsafe_count > 0 {
+            let unsafe_size: u64 = all_entries
+                .iter()
+                .filter(|e| e.safety != SafetyLevel::Safe && e.safety != SafetyLevel::Error)
+                .map(|e| e.size)
+                .sum();
+            println!(
+                "  {} {unsafe_count} Caution/Danger items ({}) hidden. Use {} to include.",
+                "Note:".dim(),
+                util::human_size(unsafe_size),
+                "--all".bold()
+            );
+        }
+    }
+}
+
 fn print_clean_summary(
     category_groups: &[(Category, Vec<&ScannedEntry>)],
     filtered: &[&ScannedEntry],
@@ -161,23 +240,30 @@ fn print_clean_summary(
         }
     );
 
+    // Detailed per-entry listing grouped by category
     for (i, (cat, cat_entries)) in category_groups.iter().enumerate() {
         let cat_size: u64 = cat_entries.iter().map(|e| e.size).sum();
-        let safety = cat.default_safety();
-        let safety_indicator = match safety {
-            SafetyLevel::Safe => "[Safe]".green(),
-            SafetyLevel::Caution => "[Caution]".yellow(),
-            SafetyLevel::Danger => "[Danger]".red(),
-            SafetyLevel::Error => "[Error]".magenta(),
-        };
         println!(
-            "  {} {} {:>10}  {} ({} items)",
+            "\n{} {} ({} items, {})",
             format!("[{:>2}]", i + 1).dim(),
-            safety_indicator,
+            cat.to_string().bold(),
+            cat_entries.len(),
             util::human_size(cat_size),
-            cat,
-            cat_entries.len()
         );
+        for entry in cat_entries {
+            let safety_indicator = match entry.safety {
+                SafetyLevel::Safe => "[Safe]".green(),
+                SafetyLevel::Caution => "[Caution]".yellow(),
+                SafetyLevel::Danger => "[Danger]".red(),
+                SafetyLevel::Error => "[Error]".magenta(),
+            };
+            println!(
+                "  {} {:>10}  {}",
+                safety_indicator,
+                util::human_size(entry.size),
+                util::tilde_path(&entry.path)
+            );
+        }
     }
 
     println!(
@@ -186,26 +272,7 @@ fn print_clean_summary(
         filtered.len(),
         category_groups.len()
     );
-
-    if !include_unsafe {
-        let unsafe_count = all_entries
-            .iter()
-            .filter(|e| e.safety != SafetyLevel::Safe)
-            .count();
-        if unsafe_count > 0 {
-            let unsafe_size: u64 = all_entries
-                .iter()
-                .filter(|e| e.safety != SafetyLevel::Safe)
-                .map(|e| e.size)
-                .sum();
-            println!(
-                "  {} {unsafe_count} Caution/Danger items ({}) hidden. Use {} to include.",
-                "Note:".dim(),
-                util::human_size(unsafe_size),
-                "--all".bold()
-            );
-        }
-    }
+    print_safety_breakdown(filtered, all_entries, include_unsafe);
 }
 
 /// Group entries by category, preserving order by total size descending.
