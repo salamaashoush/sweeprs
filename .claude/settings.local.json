@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf ~/Workspace/Box/signer/.git)",
+      "Bash(git clone:*)",
+      "Bash(rm -rf ~/Workspace/Box/signer/.git/objects/pack/pack-tmp.pack)",
+      "Bash(git init:*)",
+      "Bash(git -C ~/Workspace/Box/signer remote add origin git@git.dev.box.net:Workflow/signer.git)",
+      "Bash(git -C ~/Workspace/Box/signer fetch --depth=1 origin HEAD)"
+    ]
+  }
+}
