@@ -9,52 +9,16 @@ use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::scanner::project_index::PROJECT_INDEX;
 use crate::scanner::walker;
 
-const GIT_SIZE_THRESHOLD: u64 = 50 * 1024 * 1024;
 const LFS_SIZE_THRESHOLD: u64 = 10 * 1024 * 1024;
 const GIT_GC_THRESHOLD: u64 = 100 * 1024 * 1024; // .git > 100 MB
 const GIT_LOOSE_THRESHOLD: u64 = 256;
 const REFLOG_THRESHOLD: u64 = 5 * 1024 * 1024; // 5 MB
 const RERERE_THRESHOLD: u64 = 1_048_576; // 1 MB
 
-pub struct GitRepoSizeRule;
 pub struct GitLfsCacheRule;
 pub struct GitGcRule;
 pub struct GitReflogRule;
 pub struct GitRererecacheRule;
-
-impl CleanupRule for GitRepoSizeRule {
-    fn name(&self) -> &'static str {
-        "Git Repository Data"
-    }
-
-    fn category(&self) -> Category {
-        Category::BuildArtifact
-    }
-
-    fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        PROJECT_INDEX
-            .git_roots()
-            .par_iter()
-            .filter_map(|root| {
-                let git_dir = root.join(".git");
-                if git_dir.exists() {
-                    let size = walker::dir_size(&git_dir);
-                    if size > GIT_SIZE_THRESHOLD {
-                        return Some(ScannedEntry {
-                            path: git_dir,
-                            size,
-                            category: Category::BuildArtifact,
-                            safety: SafetyLevel::Caution,
-                            description: "Git repository data".to_owned(),
-                            item_count: None,
-                        });
-                    }
-                }
-                None
-            })
-            .collect()
-    }
-}
 
 impl CleanupRule for GitLfsCacheRule {
     fn name(&self) -> &'static str {
@@ -310,7 +274,6 @@ pub fn clean_git_gc(entry_path: &str) -> Result<(), std::io::Error> {
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
-        Box::new(GitRepoSizeRule),
         Box::new(GitLfsCacheRule),
         Box::new(GitGcRule),
         Box::new(GitReflogRule),
