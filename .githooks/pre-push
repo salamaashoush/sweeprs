@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "pre-push: running tests..."
+cargo test --quiet || {
+    echo ""
+    echo "Tests failed. Fix them before pushing."
+    exit 1
+}
+
+echo "pre-push: all tests passed."

@@ -26,11 +26,12 @@ install-binstall:
         cargo install cargo-binstall; \
     fi
 
-# Install git pre-commit hook to run full checks
+# Install git hooks (format + check + clippy on commit, tests on push)
 install-hook:
-    echo '#!/bin/sh' > .git/hooks/pre-commit
-    echo 'just ready' >> .git/hooks/pre-commit
-    chmod +x .git/hooks/pre-commit
+    git config core.hooksPath .githooks
+    @echo "Git hooks installed from .githooks/"
+    @echo "  pre-commit: cargo fmt --check, cargo check, cargo clippy"
+    @echo "  pre-push:   cargo test"
 
 # Install all Rust development tools (basic + advanced)
 install-tools: install-binstall

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "pre-commit: checking format..."
+cargo fmt --check || {
+    echo ""
+    echo "Format check failed. Run 'cargo fmt' to fix."
+    exit 1
+}
+
+echo "pre-commit: running cargo check..."
+cargo check --quiet || {
+    echo ""
+    echo "cargo check failed."
+    exit 1
+}
+
+echo "pre-commit: running clippy..."
+cargo clippy --quiet -- -D warnings || {
+    echo ""
+    echo "Clippy found warnings. Fix them before committing."
+    exit 1
+}
+
+echo "pre-commit: all checks passed."
