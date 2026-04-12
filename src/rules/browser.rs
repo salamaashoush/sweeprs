@@ -6,7 +6,9 @@ cache_rule!(
     "Chrome cache",
     Category::BrowserCache,
     SafetyLevel::Safe,
-    "Library/Caches/Google/Chrome"
+    "Library/Caches/Google/Chrome",
+    ".cache/google-chrome",
+    ".cache/chromium"
 );
 
 cache_rule!(
@@ -14,7 +16,8 @@ cache_rule!(
     "Firefox cache",
     Category::BrowserCache,
     SafetyLevel::Safe,
-    "Library/Caches/Firefox"
+    "Library/Caches/Firefox",
+    ".cache/mozilla/firefox"
 );
 
 cache_rule!(
@@ -38,7 +41,8 @@ cache_rule!(
     "Brave cache",
     Category::BrowserCache,
     SafetyLevel::Safe,
-    "Library/Caches/BraveSoftware/Brave-Browser"
+    "Library/Caches/BraveSoftware/Brave-Browser",
+    ".cache/BraveSoftware/Brave-Browser"
 );
 
 cache_rule!(
@@ -46,7 +50,8 @@ cache_rule!(
     "Microsoft Edge cache",
     Category::BrowserCache,
     SafetyLevel::Safe,
-    "Library/Caches/Microsoft Edge"
+    "Library/Caches/Microsoft Edge",
+    ".cache/microsoft-edge"
 );
 
 cache_rule!(
@@ -54,7 +59,8 @@ cache_rule!(
     "Opera cache",
     Category::BrowserCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.operasoftware.Opera"
+    "Library/Caches/com.operasoftware.Opera",
+    ".cache/opera"
 );
 
 cache_rule!(
@@ -62,7 +68,8 @@ cache_rule!(
     "Vivaldi cache",
     Category::BrowserCache,
     SafetyLevel::Safe,
-    "Library/Caches/Vivaldi"
+    "Library/Caches/Vivaldi",
+    ".cache/vivaldi"
 );
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {

@@ -7,7 +7,9 @@ cache_rule!(
     Category::AppCache,
     SafetyLevel::Safe,
     "Library/Application Support/Slack/Cache",
-    "Library/Application Support/Slack/Service Worker/CacheStorage"
+    "Library/Application Support/Slack/Service Worker/CacheStorage",
+    ".config/Slack/Cache",
+    ".config/Slack/Service Worker/CacheStorage"
 );
 
 cache_rule!(
@@ -16,7 +18,9 @@ cache_rule!(
     Category::AppCache,
     SafetyLevel::Safe,
     "Library/Application Support/discord/Cache",
-    "Library/Application Support/discord/Code Cache"
+    "Library/Application Support/discord/Code Cache",
+    ".config/discord/Cache",
+    ".config/discord/Code Cache"
 );
 
 cache_rule!(
@@ -24,7 +28,8 @@ cache_rule!(
     "Microsoft Teams (Classic)",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Application Support/Microsoft/Teams/Cache"
+    "Library/Application Support/Microsoft/Teams/Cache",
+    ".config/Microsoft/Microsoft Teams/Cache"
 );
 
 cache_rule!(
@@ -32,7 +37,8 @@ cache_rule!(
     "Microsoft Teams",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.microsoft.teams2"
+    "Library/Caches/com.microsoft.teams2",
+    ".cache/ms-teams"
 );
 
 cache_rule!(
@@ -40,7 +46,8 @@ cache_rule!(
     "Spotify",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.spotify.client"
+    "Library/Caches/com.spotify.client",
+    ".cache/spotify"
 );
 
 cache_rule!(
@@ -48,7 +55,8 @@ cache_rule!(
     "Zoom",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/us.zoom.xos"
+    "Library/Caches/us.zoom.xos",
+    ".cache/zoom"
 );
 
 cache_rule!(
@@ -56,7 +64,8 @@ cache_rule!(
     "Telegram",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/ru.keepcoder.Telegram"
+    "Library/Caches/ru.keepcoder.Telegram",
+    ".cache/TelegramDesktop"
 );
 
 cache_rule!(
@@ -72,7 +81,8 @@ cache_rule!(
     "Signal",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Application Support/Signal/Cache"
+    "Library/Application Support/Signal/Cache",
+    ".config/Signal/Cache"
 );
 
 cache_rule!(
@@ -80,7 +90,8 @@ cache_rule!(
     "Figma",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.figma.Desktop"
+    "Library/Caches/com.figma.Desktop",
+    ".config/Figma/Cache"
 );
 
 cache_rule!(
@@ -88,7 +99,8 @@ cache_rule!(
     "Notion",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/notion.id"
+    "Library/Caches/notion.id",
+    ".config/Notion/Cache"
 );
 
 cache_rule!(
@@ -96,7 +108,8 @@ cache_rule!(
     "Linear",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.linear"
+    "Library/Caches/com.linear",
+    ".config/Linear/Cache"
 );
 
 cache_rule!(
@@ -104,7 +117,8 @@ cache_rule!(
     "1Password",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.1password.1password"
+    "Library/Caches/com.1password.1password",
+    ".config/1Password/Cache"
 );
 
 cache_rule!(
@@ -112,7 +126,8 @@ cache_rule!(
     "Postman",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.postmanlabs.mac"
+    "Library/Caches/com.postmanlabs.mac",
+    ".config/Postman/Cache"
 );
 
 cache_rule!(
@@ -120,7 +135,8 @@ cache_rule!(
     "Docker Desktop",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.docker.docker"
+    "Library/Caches/com.docker.docker",
+    ".docker/desktop/cache"
 );
 
 cache_rule!(
@@ -128,7 +144,8 @@ cache_rule!(
     "Obsidian",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/md.obsidian"
+    "Library/Caches/md.obsidian",
+    ".config/obsidian/Cache"
 );
 
 cache_rule!(
@@ -160,7 +177,8 @@ cache_rule!(
     "Chrome Code Cache",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Application Support/Google/Chrome/Default/Code Cache"
+    "Library/Application Support/Google/Chrome/Default/Code Cache",
+    ".config/google-chrome/Default/Code Cache"
 );
 
 cache_rule!(
@@ -168,7 +186,8 @@ cache_rule!(
     "Chrome Service Worker cache",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Application Support/Google/Chrome/Default/Service Worker/CacheStorage"
+    "Library/Application Support/Google/Chrome/Default/Service Worker/CacheStorage",
+    ".config/google-chrome/Default/Service Worker/CacheStorage"
 );
 
 cache_rule!(
@@ -176,7 +195,8 @@ cache_rule!(
     "Firefox profile cache",
     Category::AppCache,
     SafetyLevel::Safe,
-    "Library/Caches/Firefox/Profiles"
+    "Library/Caches/Firefox/Profiles",
+    ".cache/mozilla/firefox"
 );
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {

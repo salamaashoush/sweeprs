@@ -16,7 +16,12 @@ impl CleanupRule for TrashRule {
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-        let trash_path = home.join(".Trash");
+
+        let trash_path = if cfg!(target_os = "macos") {
+            home.join(".Trash")
+        } else {
+            home.join(".local/share/Trash")
+        };
 
         if !trash_path.exists() {
             return Vec::new();

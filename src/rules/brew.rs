@@ -113,7 +113,16 @@ impl CleanupRule for BrewAutoremoveRule {
         }
 
         // Sum up sizes of Cellar directories for each formula.
-        let cellar = std::path::Path::new("/opt/homebrew/Cellar");
+        let cellar_paths = [
+            "/opt/homebrew/Cellar",            // macOS Apple Silicon
+            "/usr/local/Cellar",               // macOS Intel
+            "/home/linuxbrew/.linuxbrew/Cellar", // Linuxbrew
+        ];
+        let cellar = cellar_paths
+            .iter()
+            .map(std::path::Path::new)
+            .find(|p| p.exists())
+            .unwrap_or(std::path::Path::new("/opt/homebrew/Cellar"));
         let mut total_size = 0u64;
         for pkg in &formulae {
             let pkg_dir = cellar.join(pkg.trim());

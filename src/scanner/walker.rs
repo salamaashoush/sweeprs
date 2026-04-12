@@ -37,10 +37,8 @@ pub fn dir_size_and_count(path: &Path) -> (u64, usize) {
 fn dir_size_fallback(path: &Path) -> u64 {
     use std::os::unix::fs::MetadataExt;
 
-    // Single metadata() call instead of exists() + is_file() + metadata()
-    let meta = match path.metadata() {
-        Ok(m) => m,
-        Err(_) => return 0,
+    let Ok(meta) = path.metadata() else {
+        return 0;
     };
 
     if meta.is_file() {
@@ -64,10 +62,8 @@ fn dir_size_fallback(path: &Path) -> u64 {
         if entry.file_type().is_some_and(|ft| ft.is_file()) {
             if let Ok(meta) = entry.metadata() {
                 let nlink = meta.nlink();
-                if nlink > 1 {
-                    if !seen_inodes.insert(meta.ino()) {
-                        continue;
-                    }
+                if nlink > 1 && !seen_inodes.insert(meta.ino()) {
+                    continue;
                 }
                 total += meta.blocks() * 512;
             }
@@ -82,10 +78,8 @@ fn dir_size_fallback(path: &Path) -> u64 {
 fn dir_size_and_count_fallback(path: &Path) -> (u64, usize) {
     use std::os::unix::fs::MetadataExt;
 
-    // Single metadata() call instead of exists() + is_file() + metadata()
-    let meta = match path.metadata() {
-        Ok(m) => m,
-        Err(_) => return (0, 0),
+    let Ok(meta) = path.metadata() else {
+        return (0, 0);
     };
 
     if meta.is_file() {
@@ -117,10 +111,8 @@ fn dir_size_and_count_fallback(path: &Path) -> (u64, usize) {
         if entry.file_type().is_some_and(|ft| ft.is_file()) {
             if let Ok(meta) = entry.metadata() {
                 let nlink = meta.nlink();
-                if nlink > 1 {
-                    if !seen_inodes.insert(meta.ino()) {
-                        continue;
-                    }
+                if nlink > 1 && !seen_inodes.insert(meta.ino()) {
+                    continue;
                 }
                 total += meta.blocks() * 512;
             }

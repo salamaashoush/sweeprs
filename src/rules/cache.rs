@@ -14,7 +14,8 @@ cache_rule!(
     "Yarn cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    "Library/Caches/Yarn"
+    "Library/Caches/Yarn",
+    ".cache/yarn"
 );
 
 cache_rule!(
@@ -22,7 +23,8 @@ cache_rule!(
     "pnpm store",
     Category::PackageCache,
     SafetyLevel::Safe,
-    "Library/pnpm/store"
+    "Library/pnpm/store",
+    ".local/share/pnpm/store"
 );
 
 cache_rule!(
@@ -47,7 +49,8 @@ cache_rule!(
     "pip cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    "Library/Caches/pip"
+    "Library/Caches/pip",
+    ".cache/pip"
 );
 
 cache_rule!(
@@ -55,7 +58,8 @@ cache_rule!(
     "Homebrew cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    "Library/Caches/Homebrew"
+    "Library/Caches/Homebrew",
+    ".cache/Homebrew"
 );
 
 cache_rule!(
@@ -72,7 +76,8 @@ cache_rule!(
     Category::PackageCache,
     SafetyLevel::Safe,
     "go/pkg/mod",
-    "Library/Caches/go-build"
+    "Library/Caches/go-build",
+    ".cache/go-build"
 );
 
 cache_rule!(
@@ -96,7 +101,8 @@ cache_rule!(
     "Composer cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    ".composer/cache"
+    ".composer/cache",
+    ".cache/composer"
 );
 
 cache_rule!(
@@ -112,7 +118,8 @@ cache_rule!(
     "Poetry cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    "Library/Caches/pypoetry"
+    "Library/Caches/pypoetry",
+    ".cache/pypoetry"
 );
 
 cache_rule!(
@@ -120,7 +127,8 @@ cache_rule!(
     "Deno cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    "Library/Caches/deno"
+    "Library/Caches/deno",
+    ".cache/deno"
 );
 
 cache_rule!(
@@ -164,6 +172,14 @@ cache_rule!(
     ".cargo/git/db"
 );
 
+cache_rule!(
+    GradleCacheRule,
+    "Gradle cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".gradle/caches"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(NpmCacheRule),
@@ -186,5 +202,6 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(MavenWrapperRule),
         Box::new(CargoGitCheckoutsRule),
         Box::new(CargoGitDbRule),
+        Box::new(GradleCacheRule),
     ]
 }

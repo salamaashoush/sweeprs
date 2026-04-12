@@ -536,7 +536,11 @@ impl CleanupRule for JavaVersionsRule {
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let jvm_dir = PathBuf::from("/Library/Java/JavaVirtualMachines");
+        let jvm_dir = if cfg!(target_os = "macos") {
+            PathBuf::from("/Library/Java/JavaVirtualMachines")
+        } else {
+            PathBuf::from("/usr/lib/jvm")
+        };
 
         if !jvm_dir.exists() {
             return Vec::new();

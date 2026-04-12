@@ -19,6 +19,7 @@ pub enum Category {
     LargeFile,
     Duplicate,
     MacosSpecific,
+    LinuxSpecific,
     AppCache,
     SystemJunk,
     MobileBackup,
@@ -42,6 +43,7 @@ impl Category {
         Self::LargeFile,
         Self::Duplicate,
         Self::MacosSpecific,
+        Self::LinuxSpecific,
         Self::AppCache,
         Self::SystemJunk,
         Self::MobileBackup,
@@ -62,6 +64,7 @@ impl Category {
             | Self::LogFile
             | Self::OldDownload
             | Self::MacosSpecific
+            | Self::LinuxSpecific
             | Self::SystemJunk
             | Self::MobileBackup
             | Self::LlmModels
@@ -87,6 +90,7 @@ impl fmt::Display for Category {
             Self::LargeFile => write!(f, "Large Files"),
             Self::Duplicate => write!(f, "Duplicates"),
             Self::MacosSpecific => write!(f, "macOS Specific"),
+            Self::LinuxSpecific => write!(f, "Linux Specific"),
             Self::AppCache => write!(f, "App Caches"),
             Self::SystemJunk => write!(f, "System Junk"),
             Self::MobileBackup => write!(f, "Mobile Backups"),

@@ -37,16 +37,33 @@ impl CleanupRule for ElectronAppDataRule {
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-        let app_support = home.join("Library/Application Support");
         let mut entries = Vec::new();
 
-        for &(app_name, app_dir) in ELECTRON_APPS {
-            let base = app_support.join(app_dir);
-            if !base.exists() {
-                continue;
+        // macOS: ~/Library/Application Support/<app>
+        let macos_dir = home.join("Library/Application Support");
+        if macos_dir.exists() {
+            for &(app_name, app_dir) in ELECTRON_APPS {
+                let base = macos_dir.join(app_dir);
+                if !base.exists() {
+                    continue;
+                }
+                for &subdir in ELECTRON_SUBDIRS {
+                    scan_subdir(&mut entries, &base, subdir, app_name);
+                }
             }
-            for &subdir in ELECTRON_SUBDIRS {
-                scan_subdir(&mut entries, &base, subdir, app_name);
+        }
+
+        // Linux: ~/.config/<app>
+        let linux_dir = home.join(".config");
+        if linux_dir.exists() {
+            for &(app_name, app_dir) in ELECTRON_APPS {
+                let base = linux_dir.join(app_dir);
+                if !base.exists() {
+                    continue;
+                }
+                for &subdir in ELECTRON_SUBDIRS {
+                    scan_subdir(&mut entries, &base, subdir, app_name);
+                }
             }
         }
 

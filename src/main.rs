@@ -16,7 +16,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use scanner::entry::Category;
 
 #[derive(Parser)]
-#[command(name = "sweeprs", version, about = "Fast macOS disk cleanup TUI")]
+#[command(name = "sweeprs", version, about = "Fast disk cleanup TUI")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -144,6 +144,7 @@ enum CategoryArg {
     LargeFiles,
     Duplicates,
     Macos,
+    Linux,
     AppCache,
     SystemJunk,
     MobileBackup,
@@ -167,6 +168,7 @@ impl CategoryArg {
             Self::LargeFiles => Category::LargeFile,
             Self::Duplicates => Category::Duplicate,
             Self::Macos => Category::MacosSpecific,
+            Self::Linux => Category::LinuxSpecific,
             Self::AppCache => Category::AppCache,
             Self::SystemJunk => Category::SystemJunk,
             Self::MobileBackup => Category::MobileBackup,
@@ -192,6 +194,7 @@ enum CleanTarget {
     LargeFiles,
     Duplicates,
     Macos,
+    Linux,
     AppCache,
     SystemJunk,
     MobileBackup,
@@ -216,6 +219,7 @@ impl CleanTarget {
             Self::LargeFiles => Some(Category::LargeFile),
             Self::Duplicates => Some(Category::Duplicate),
             Self::Macos => Some(Category::MacosSpecific),
+            Self::Linux => Some(Category::LinuxSpecific),
             Self::AppCache => Some(Category::AppCache),
             Self::SystemJunk => Some(Category::SystemJunk),
             Self::MobileBackup => Some(Category::MobileBackup),
@@ -446,6 +450,7 @@ fn main() -> Result<()> {
                     Category::LargeFile => "large-files",
                     Category::Duplicate => "duplicates",
                     Category::MacosSpecific => "macos",
+                    Category::LinuxSpecific => "linux",
                     Category::AppCache => "app-cache",
                     Category::SystemJunk => "system-junk",
                     Category::MobileBackup => "mobile-backup",

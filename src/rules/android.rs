@@ -9,7 +9,8 @@ cache_rule!(
     "Android SDK cache",
     Category::BuildArtifact,
     SafetyLevel::Caution,
-    "Library/Android/sdk/system-images"
+    "Library/Android/sdk/system-images",
+    "Android/Sdk/system-images"
 );
 
 cache_rule!(

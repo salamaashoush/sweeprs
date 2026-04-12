@@ -1,28 +1,73 @@
 use std::process::Command;
 
-/// Send a macOS notification via osascript (fire-and-forget).
+/// Send a desktop notification (fire-and-forget).
 ///
-/// Uses `display notification` `AppleScript` which routes through Notification Center.
-/// The child process is spawned and not waited on -- no thread, no `CFRunLoop`, no zombies.
+/// On macOS, uses `osascript` with `display notification` `AppleScript`.
+/// On Linux, calls the freedesktop `org.freedesktop.Notifications` D-Bus interface
+/// via `gdbus` (glib2, always present), falling back to `notify-send` (libnotify).
 pub fn send_notification(title: &str, message: &str) {
-    let script = format!(
-        "display notification {message} with title {title}",
-        message = applescript_quote(message),
-        title = applescript_quote(title),
-    );
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "display notification {message} with title {title}",
+            message = applescript_quote(message),
+            title = applescript_quote(title),
+        );
 
-    match Command::new("osascript").args(["-e", &script]).spawn() {
-        Ok(_child) => {
-            // Fire-and-forget: child will be reaped when it exits.
-            // We intentionally do not wait on it.
+        match Command::new("osascript").args(["-e", &script]).spawn() {
+            Ok(_child) => {}
+            Err(e) => {
+                eprintln!("[sweeprs monitor] Failed to spawn notification: {e}");
+            }
         }
-        Err(e) => {
-            eprintln!("[sweeprs monitor] Failed to spawn notification: {e}");
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try gdbus first (ships with glib2, present on virtually all graphical Linux)
+        // This calls the freedesktop Desktop Notifications spec directly via D-Bus,
+        // works on GNOME, KDE, XFCE, Sway, i3+dunst, Hyprland, etc.
+        let gdbus_result = Command::new("gdbus")
+            .args([
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.Notifications",
+                "--object-path",
+                "/org/freedesktop/Notifications",
+                "--method",
+                "org.freedesktop.Notifications.Notify",
+                "sweeprs",            // app_name
+                "0",                  // replaces_id
+                "",                   // app_icon
+                title,                // summary
+                message,              // body
+                "[]",                 // actions
+                "{}",                 // hints
+                "5000",               // expire_timeout ms
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+
+        if gdbus_result.is_ok() {
+            return;
+        }
+
+        // Fallback: notify-send (requires libnotify, not always installed)
+        match Command::new("notify-send")
+            .args(["-a", "sweeprs", title, message])
+            .spawn()
+        {
+            Ok(_child) => {}
+            Err(e) => {
+                eprintln!("[sweeprs monitor] No notification method available: {e}");
+            }
         }
     }
 }
 
-/// Escape a string for `AppleScript`: wrap in double quotes, escape backslashes and inner quotes.
+#[cfg(target_os = "macos")]
 fn applescript_quote(s: &str) -> String {
     let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")

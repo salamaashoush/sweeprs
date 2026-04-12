@@ -245,7 +245,8 @@ cache_rule!(
     "llama.cpp cache",
     Category::LlmModels,
     SafetyLevel::Safe,
-    "Library/Caches/llama.cpp"
+    "Library/Caches/llama.cpp",
+    ".cache/llama.cpp"
 );
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {

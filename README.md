@@ -9,7 +9,7 @@
 
 # sweeprs
 
-Fast macOS disk cleanup TUI and CLI written in Rust.
+Fast disk cleanup TUI and CLI written in Rust. Supports macOS and Linux.
 
 Scans your system for reclaimable disk space across 17 categories and 23+ rule modules,
 presents results in an interactive terminal UI or structured CLI output, and cleans up
@@ -28,7 +28,7 @@ safely with dry-run by default.
 - **Size filtering** -- `--min-size` to focus on large items
 - **Global excludes** -- configure paths to never touch in your config file
 - **Parallel scanning** -- rayon-powered concurrent rule execution
-- **macOS optimized** -- `getattrlistbulk` syscall for batched file metadata reads
+- **Platform optimized** -- uses native OS primitives for fast scanning on each platform
 - **Streaming results** -- TUI updates as each rule completes, no waiting for full scan
 - **Docker and Homebrew** -- detects and prunes containers, images, volumes, caches, and unneeded formulae
 - **Gitignore-aware** -- finds large directories ignored by git in your projects

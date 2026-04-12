@@ -11,6 +11,7 @@ pub mod core_dumps;
 pub mod dev_caches;
 pub mod docker;
 pub mod downloads;
+#[cfg(target_os = "macos")]
 pub mod ds_store;
 pub mod duplicates;
 pub mod electron_data;
@@ -22,7 +23,11 @@ pub mod ide;
 pub mod large_files;
 pub mod llm;
 pub mod logs;
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "macos")]
 pub mod macos_extra;
 pub mod mobile;
 pub mod orphan_detection;
@@ -101,8 +106,12 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(downloads::rules());
     rules.extend(large_files::rules());
     rules.extend(duplicates::rules());
+    #[cfg(target_os = "macos")]
     rules.extend(macos::rules());
+    #[cfg(target_os = "macos")]
     rules.extend(macos_extra::rules());
+    #[cfg(target_os = "linux")]
+    rules.extend(linux::rules());
     rules.extend(app_cache::rules());
     rules.extend(system::rules());
     rules.extend(mobile::rules());
@@ -119,6 +128,7 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(virtualization::rules());
     rules.extend(generic_caches::rules());
     rules.extend(orphan_detection::rules());
+    #[cfg(target_os = "macos")]
     rules.extend(ds_store::rules());
     rules.extend(empty_dirs::rules());
     rules.extend(stale_project::rules());

@@ -66,7 +66,7 @@ fn run_with_timeout(args: &[&str], timeout: Duration) -> Option<std::process::Ou
 }
 
 fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
-    let commands: &[(&str, &[&str])] = &[
+    let mut commands: Vec<(&str, &[&str])> = vec![
         (
             "rustup_active_toolchain",
             &["rustup", "show", "active-toolchain"],
@@ -77,12 +77,27 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
         ("ruby_version", &["ruby", "--version"]),
         ("java_version", &["java", "--version"]),
         ("docker_system_df", &["docker", "system", "df"]),
+    ];
+
+    #[cfg(target_os = "macos")]
+    commands.extend_from_slice(&[
         ("tmutil_snapshots", &["tmutil", "listlocalsnapshots", "/"]),
         ("brew_cleanup", &["brew", "cleanup", "-n"]),
         ("brew_autoremove", &["brew", "autoremove", "--dry-run"]),
         ("diskutil_apfs_list", &["diskutil", "apfs", "list"]),
         ("diskutil_info_root", &["diskutil", "info", "-plist", "/"]),
-    ];
+    ]);
+
+    #[cfg(target_os = "linux")]
+    commands.extend_from_slice(&[
+        (
+            "journalctl_disk_usage",
+            &["journalctl", "--disk-usage"],
+        ),
+        ("uname_r", &["uname", "-r"]),
+    ]);
+
+    let commands = commands;
 
     let mut results = FxHashMap::default();
 

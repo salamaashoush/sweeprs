@@ -10,7 +10,10 @@ cache_rule!(
     SafetyLevel::Safe,
     "Library/Application Support/Code/Cache",
     "Library/Application Support/Code/CachedData",
-    "Library/Application Support/Code/CachedExtensions"
+    "Library/Application Support/Code/CachedExtensions",
+    ".config/Code/Cache",
+    ".config/Code/CachedData",
+    ".config/Code/CachedExtensionVSIXs"
 );
 
 cache_rule!(
@@ -34,12 +37,7 @@ impl CleanupRule for JetBrainsCacheRule {
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-        let lib_caches = home.join("Library/Caches");
         let mut entries = Vec::new();
-
-        if !lib_caches.exists() {
-            return entries;
-        }
 
         let prefixes = [
             "JetBrains",
@@ -51,32 +49,58 @@ impl CleanupRule for JetBrainsCacheRule {
             "RustRover",
             "DataGrip",
             "Rider",
+            "PhpStorm",
+            "AndroidStudio",
         ];
 
-        if let Ok(read_dir) = std::fs::read_dir(&lib_caches) {
-            for entry in read_dir.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if prefixes.iter().any(|p| name_str.starts_with(p)) {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let size = walker::dir_size(&path);
-                        if size > 0 {
-                            entries.push(ScannedEntry {
-                                path,
-                                size,
-                                category: Category::IdeCache,
-                                safety: SafetyLevel::Safe,
-                                description: format!("{name_str} cache"),
-                                item_count: None,
-                            });
-                        }
-                    }
+        // macOS: ~/Library/Caches/JetBrains*
+        let macos_caches = home.join("Library/Caches");
+        scan_jetbrains_dir(&macos_caches, &prefixes, &mut entries);
+
+        // Linux: ~/.cache/JetBrains*
+        let linux_caches = home.join(".cache");
+        scan_jetbrains_dir(&linux_caches, &prefixes, &mut entries);
+
+        // Linux: ~/.local/share/JetBrains* (IDE configs/indices)
+        let linux_local = home.join(".local/share");
+        scan_jetbrains_dir(&linux_local, &prefixes, &mut entries);
+
+        entries
+    }
+}
+
+fn scan_jetbrains_dir(
+    dir: &std::path::Path,
+    prefixes: &[&str],
+    entries: &mut Vec<ScannedEntry>,
+) {
+    if !dir.exists() {
+        return;
+    }
+
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in read_dir.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if prefixes.iter().any(|p| name_str.starts_with(p)) {
+            let path = entry.path();
+            if path.is_dir() {
+                let size = walker::dir_size(&path);
+                if size > 0 {
+                    entries.push(ScannedEntry {
+                        path,
+                        size,
+                        category: Category::IdeCache,
+                        safety: SafetyLevel::Safe,
+                        description: format!("{name_str} cache"),
+                        item_count: None,
+                    });
                 }
             }
         }
-
-        entries
     }
 }
 
@@ -86,7 +110,9 @@ cache_rule!(
     Category::IdeCache,
     SafetyLevel::Safe,
     "Library/Application Support/Cursor/Cache",
-    "Library/Application Support/Cursor/CachedData"
+    "Library/Application Support/Cursor/CachedData",
+    ".config/Cursor/Cache",
+    ".config/Cursor/CachedData"
 );
 
 cache_rule!(
@@ -94,7 +120,9 @@ cache_rule!(
     "Zed cache",
     Category::IdeCache,
     SafetyLevel::Safe,
-    "Library/Caches/dev.zed.Zed"
+    "Library/Caches/dev.zed.Zed",
+    ".cache/zed",
+    ".local/share/zed"
 );
 
 cache_rule!(
@@ -102,7 +130,8 @@ cache_rule!(
     "Sublime Text cache",
     Category::IdeCache,
     SafetyLevel::Safe,
-    "Library/Caches/com.sublimetext.4"
+    "Library/Caches/com.sublimetext.4",
+    ".cache/sublime-text"
 );
 
 cache_rule!(

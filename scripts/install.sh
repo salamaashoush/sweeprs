@@ -5,24 +5,30 @@ REPO="salamaashoush/sweeprs"
 BINARY_NAME="sweeprs"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
+# Detect OS
+OS=$(uname -s)
+case "$OS" in
+    Darwin) OS_TARGET="apple-darwin" ;;
+    Linux)  OS_TARGET="unknown-linux-gnu" ;;
+    *)
+        echo "Unsupported OS: $OS"
+        exit 1
+        ;;
+esac
+
 # Detect architecture
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)  TARGET="x86_64-apple-darwin" ;;
-    arm64)   TARGET="aarch64-apple-darwin" ;;
-    aarch64) TARGET="aarch64-apple-darwin" ;;
+    x86_64)  ARCH_TARGET="x86_64" ;;
+    arm64)   ARCH_TARGET="aarch64" ;;
+    aarch64) ARCH_TARGET="aarch64" ;;
     *)
         echo "Unsupported architecture: $ARCH"
         exit 1
         ;;
 esac
 
-# Detect OS
-OS=$(uname -s)
-if [ "$OS" != "Darwin" ]; then
-    echo "sweeprs only supports macOS. Detected: $OS"
-    exit 1
-fi
+TARGET="${ARCH_TARGET}-${OS_TARGET}"
 
 # Get latest version
 if [ -n "${VERSION:-}" ]; then

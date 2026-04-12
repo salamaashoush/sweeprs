@@ -106,6 +106,8 @@ pub struct EnabledCategories {
     pub duplicate: bool,
     #[serde(alias = "macosSpecific")]
     pub macos_specific: bool,
+    #[serde(alias = "linuxSpecific")]
+    pub linux_specific: bool,
     #[serde(alias = "appCache")]
     pub app_cache: bool,
     #[serde(alias = "systemJunk")]
@@ -146,23 +148,31 @@ impl Default for GeneralConfig {
             // Default categories cover all safe-to-clean items on a dev machine.
             // Empty list means "all enabled categories" for backwards compat,
             // but we ship explicit defaults so users know what will be cleaned.
-            default_clean_categories: vec![
-                "cache".to_owned(),
-                "build".to_owned(),
-                "deps".to_owned(),
-                "browser".to_owned(),
-                "ide".to_owned(),
-                "app-cache".to_owned(),
-                "logs".to_owned(),
-                "system-junk".to_owned(),
-                "macos".to_owned(),
-                "stale-project".to_owned(),
-                "docker".to_owned(),
-                "toolchain".to_owned(),
-                "trash".to_owned(),
-                "llm".to_owned(),
-                "mobile-backup".to_owned(),
-            ],
+            default_clean_categories: {
+                let mut cats = vec![
+                    "cache".to_owned(),
+                    "build".to_owned(),
+                    "deps".to_owned(),
+                    "browser".to_owned(),
+                    "ide".to_owned(),
+                    "app-cache".to_owned(),
+                    "logs".to_owned(),
+                    "system-junk".to_owned(),
+                    "stale-project".to_owned(),
+                    "docker".to_owned(),
+                    "toolchain".to_owned(),
+                    "trash".to_owned(),
+                    "llm".to_owned(),
+                    "mobile-backup".to_owned(),
+                ];
+                if cfg!(target_os = "macos") {
+                    cats.push("macos".to_owned());
+                }
+                if cfg!(target_os = "linux") {
+                    cats.push("linux".to_owned());
+                }
+                cats
+            },
             exclude_clean_categories: Vec::new(),
             // "caution" = Safe + Caution items. On a dev machine, caution-level
             // items (temp files, old downloads, stale project artifacts, docker
@@ -215,6 +225,7 @@ impl Default for EnabledCategories {
             large_file: true,
             duplicate: false,
             macos_specific: true,
+            linux_specific: true,
             app_cache: true,
             system_junk: true,
             mobile_backup: true,
@@ -316,6 +327,7 @@ impl Config {
             Category::LargeFile => self.categories.enabled.large_file,
             Category::Duplicate => self.categories.enabled.duplicate,
             Category::MacosSpecific => self.categories.enabled.macos_specific,
+            Category::LinuxSpecific => self.categories.enabled.linux_specific,
             Category::AppCache => self.categories.enabled.app_cache,
             Category::SystemJunk => self.categories.enabled.system_junk,
             Category::MobileBackup => self.categories.enabled.mobile_backup,
@@ -341,6 +353,7 @@ impl Config {
             "large-files" => Some(Category::LargeFile),
             "duplicates" => Some(Category::Duplicate),
             "macos" => Some(Category::MacosSpecific),
+            "linux" => Some(Category::LinuxSpecific),
             "app-cache" => Some(Category::AppCache),
             "system-junk" => Some(Category::SystemJunk),
             "mobile-backup" => Some(Category::MobileBackup),

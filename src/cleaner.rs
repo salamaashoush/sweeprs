@@ -23,7 +23,7 @@ fn remove_dir_robust(path: &Path) -> io::Result<()> {
             fix_permissions(path);
             std::fs::remove_dir_all(path)
         }
-        Err(e) if e.raw_os_error() == Some(66) /* ENOTEMPTY on macOS */ => {
+        Err(e) if e.raw_os_error() == Some(if cfg!(target_os = "macos") { 66 } else { 39 }) /* ENOTEMPTY */ => {
             // Race: an app (e.g. Chrome) recreated files during deletion. Retry once.
             std::thread::sleep(std::time::Duration::from_millis(100));
             std::fs::remove_dir_all(path)
@@ -389,13 +389,21 @@ fn interactive_confirm(
 /// Check if a filesystem path requires root privileges to modify.
 fn needs_root(path: &Path) -> bool {
     let path_str = path.display().to_string();
-    // System directories that require sudo
+    // System directories that require elevated permissions
     path_str.starts_with("/Library/")
-        || path_str.starts_with("/var/")
-        || path_str.starts_with("/private/var/")
         || path_str.starts_with("/System/")
+        || path_str.starts_with("/private/var/")
+        || path_str.starts_with("/var/cache/apt/")
+        || path_str.starts_with("/var/cache/dnf/")
+        || path_str.starts_with("/var/cache/pacman/")
+        || path_str.starts_with("/var/cache/zypp/")
+        || path_str.starts_with("/var/log/journal/")
+        || path_str.starts_with("/var/lib/systemd/")
+        || path_str.starts_with("/boot/")
+        || path_str.starts_with("/usr/lib/modules/")
 }
 
+#[allow(clippy::too_many_lines)]
 fn delete_entries(
     entries: &[&ScannedEntry],
     total_size: u64,
@@ -412,6 +420,10 @@ fn delete_entries(
         if path_str.starts_with("git-gc:")
             || path_str.starts_with("docker:")
             || path_str.starts_with("brew:")
+            || path_str.starts_with("journal:")
+            || path_str.starts_with("pacman:")
+            || path_str.starts_with("apt:")
+            || path_str.starts_with("dnf:")
         {
             slow_entries.push(entry);
         } else if needs_root(&entry.path) {
@@ -540,6 +552,14 @@ fn run_slow_operations(
         } else if path_str.starts_with("docker:") {
             let kind = path_str.strip_prefix("docker:").unwrap_or(&path_str);
             format!("docker prune {kind}")
+        } else if path_str.starts_with("journal:") {
+            "journalctl --vacuum-size=100M".to_owned()
+        } else if path_str.starts_with("pacman:") {
+            "paccache -r -k 2".to_owned()
+        } else if path_str.starts_with("apt:") {
+            "apt clean".to_owned()
+        } else if path_str.starts_with("dnf:") {
+            "dnf clean all".to_owned()
         } else {
             format!("brew cleanup {path_str}")
         };
@@ -557,6 +577,26 @@ fn run_slow_operations(
             docker::clean_docker_entry(&path_str)
         } else if path_str.starts_with("brew:") {
             brew::clean_brew_entry(&path_str)
+        } else if path_str.starts_with("journal:") {
+            #[cfg(target_os = "linux")]
+            { crate::rules::linux::clean_journal() }
+            #[cfg(not(target_os = "linux"))]
+            { Err(std::io::Error::other("not supported")) }
+        } else if path_str.starts_with("pacman:") {
+            #[cfg(target_os = "linux")]
+            { crate::rules::linux::clean_pacman() }
+            #[cfg(not(target_os = "linux"))]
+            { Err(std::io::Error::other("not supported")) }
+        } else if path_str.starts_with("apt:") {
+            #[cfg(target_os = "linux")]
+            { crate::rules::linux::clean_apt() }
+            #[cfg(not(target_os = "linux"))]
+            { Err(std::io::Error::other("not supported")) }
+        } else if path_str.starts_with("dnf:") {
+            #[cfg(target_os = "linux")]
+            { crate::rules::linux::clean_dnf() }
+            #[cfg(not(target_os = "linux"))]
+            { Err(std::io::Error::other("not supported")) }
         } else {
             git_data::clean_git_gc(&path_str)
         };
