@@ -386,94 +386,115 @@ fn interactive_confirm(
     Ok(selected)
 }
 
+/// Check if a filesystem path requires root privileges to modify.
+fn needs_root(path: &Path) -> bool {
+    let path_str = path.display().to_string();
+    // System directories that require sudo
+    path_str.starts_with("/Library/")
+        || path_str.starts_with("/var/")
+        || path_str.starts_with("/private/var/")
+        || path_str.starts_with("/System/")
+}
+
 fn delete_entries(
     entries: &[&ScannedEntry],
     total_size: u64,
     archive: bool,
     archive_dir: Option<&Path>,
 ) {
-    let action = if archive { "Archiving" } else { "Deleting" };
-    let bar = ProgressBar::new(entries.len() as u64);
-    bar.set_style(
-        ProgressStyle::with_template(&format!(
-            "{{spinner:.green}} {action} [{{bar:30.green/dim}}] {{pos}}/{{len}} items  {{msg}}"
-        ))
-        .expect("valid template")
-        .progress_chars("=>-"),
-    );
+    // Separate entries into fast (parallel filesystem ops) and slow (sequential git-gc, docker)
+    let mut fast_entries: Vec<&ScannedEntry> = Vec::new();
+    let mut slow_entries: Vec<&ScannedEntry> = Vec::new();
+    let mut skipped_entries: Vec<(&ScannedEntry, &str)> = Vec::new();
+
+    for entry in entries {
+        let path_str = entry.path.display().to_string();
+        if path_str.starts_with("git-gc:")
+            || path_str.starts_with("docker:")
+            || path_str.starts_with("brew:")
+        {
+            slow_entries.push(entry);
+        } else if needs_root(&entry.path) {
+            skipped_entries.push((entry, "requires sudo"));
+        } else {
+            fast_entries.push(entry);
+        }
+    }
+
+    // Report skipped items upfront
+    if !skipped_entries.is_empty() {
+        println!();
+        for (entry, reason) in &skipped_entries {
+            println!(
+                "  {} {} ({})",
+                "Skipped".yellow(),
+                util::tilde_path(&entry.path),
+                reason
+            );
+        }
+    }
+
+    let actionable_count = fast_entries.len() + slow_entries.len();
+    if actionable_count == 0 {
+        println!("\nNothing to clean (all items require elevated permissions).");
+        return;
+    }
 
     let cleaned = AtomicU64::new(0);
     let errors: Mutex<Vec<(PathBuf, io::Error)>> = Mutex::new(Vec::new());
 
-    entries.par_iter().for_each(|entry| {
-        let path_str = entry.path.display().to_string();
+    let action = if archive { "Archiving" } else { "Cleaning" };
 
-        let is_synthetic = path_str.starts_with("docker:")
-            || path_str.starts_with("brew:")
-            || path_str.starts_with("git-gc:");
+    run_slow_operations(&slow_entries, &cleaned, &errors);
 
-        let result = if path_str.starts_with("docker:") {
-            docker::clean_docker_entry(&path_str)
-        } else if path_str.starts_with("brew:") {
-            brew::clean_brew_entry(&path_str)
-        } else if path_str.starts_with("git-gc:") {
-            git_data::clean_git_gc(&path_str)
-        } else if archive && entry.path.is_dir() {
-            archive_directory(&entry.path, archive_dir)
-        } else if entry.path.is_dir() {
-            remove_dir_robust(&entry.path)
-        } else if entry.path.is_file() {
-            std::fs::remove_file(&entry.path)
-        } else {
-            bar.inc(1);
-            return;
-        };
+    // Phase 2: fast parallel filesystem deletions with progress bar
+    if !fast_entries.is_empty() {
+        let bar = ProgressBar::new(fast_entries.len() as u64);
+        bar.set_style(
+            ProgressStyle::with_template(&format!(
+                "{{spinner:.green}} {action} [{{bar:30.green/dim}}] {{pos}}/{{len}} items  {{msg}}"
+            ))
+            .expect("valid template")
+            .progress_chars("=>-"),
+        );
 
-        match result {
-            Ok(()) => {
-                // For synthetic paths (docker:/brew:) or fully removed entries,
-                // count the full size. For filesystem paths, verify removal.
-                let freed = if is_synthetic || !entry.path.exists() {
-                    entry.size
-                } else {
-                    // Partial deletion or archive: measure what remains and subtract.
-                    // For archives, the archive file is smaller than the original.
-                    let remaining = if entry.path.is_dir() {
-                        crate::scanner::walker::dir_size(&entry.path)
-                    } else if entry.path.is_file() {
-                        entry.path.metadata().map_or(0, |m| m.len())
-                    } else {
-                        0
-                    };
-                    entry.size.saturating_sub(remaining)
-                };
-                let total = cleaned.fetch_add(freed, Ordering::Relaxed) + freed;
-                bar.set_message(format!(
-                    "{} / {}",
-                    util::human_size(total),
-                    util::human_size(total_size),
-                ));
-            }
-            Err(e) => {
-                // Even on error, some bytes may have been freed (partial deletion)
-                if !is_synthetic && entry.path.exists() {
-                    let remaining = if entry.path.is_dir() {
-                        crate::scanner::walker::dir_size(&entry.path)
-                    } else {
-                        entry.path.metadata().map_or(0, |m| m.len())
-                    };
-                    let freed = entry.size.saturating_sub(remaining);
+        fast_entries.par_iter().for_each(|entry| {
+            let short_path = util::tilde_path(&entry.path);
+            bar.set_message(short_path.clone());
+
+            let result = if archive && entry.path.is_dir() {
+                archive_directory(&entry.path, archive_dir)
+            } else if entry.path.is_dir() {
+                remove_dir_robust(&entry.path)
+            } else if entry.path.is_file() {
+                std::fs::remove_file(&entry.path)
+            } else {
+                bar.inc(1);
+                return;
+            };
+
+            let freed = measure_freed(entry, &result);
+            match result {
+                Ok(()) => {
+                    let total = cleaned.fetch_add(freed, Ordering::Relaxed) + freed;
+                    bar.set_message(format!(
+                        "{} / {}",
+                        util::human_size(total),
+                        util::human_size(total_size),
+                    ));
+                }
+                Err(e) => {
                     if freed > 0 {
                         cleaned.fetch_add(freed, Ordering::Relaxed);
                     }
+                    errors.lock().unwrap().push((entry.path.clone(), e));
                 }
-                errors.lock().unwrap().push((entry.path.clone(), e));
             }
-        }
-        bar.inc(1);
-    });
+            bar.inc(1);
+        });
 
-    bar.finish_and_clear();
+        bar.finish_and_clear();
+    }
 
     let cleaned = cleaned.load(Ordering::Relaxed);
     let errors = errors.into_inner().unwrap();
@@ -481,11 +502,100 @@ fn delete_entries(
     let verb = if archive { "Archived" } else { "Cleaned" };
     println!("\n{verb}: {}", util::human_size(cleaned).green().bold());
 
+    if !skipped_entries.is_empty() {
+        let skipped_size: u64 = skipped_entries.iter().map(|(e, _)| e.size).sum();
+        println!(
+            "Skipped: {} ({} items need sudo)",
+            util::human_size(skipped_size).yellow(),
+            skipped_entries.len()
+        );
+    }
+
     if !errors.is_empty() {
         println!("\nErrors:");
         for (path, err) in &errors {
             println!("  {} {}: {err}", "Failed".red(), util::tilde_path(path));
         }
+    }
+}
+
+/// Run slow sequential operations (git gc, docker prune, brew cleanup) with per-item spinners.
+fn run_slow_operations(
+    entries: &[&ScannedEntry],
+    cleaned: &AtomicU64,
+    errors: &Mutex<Vec<(PathBuf, io::Error)>>,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    println!();
+    for entry in entries {
+        let path_str = entry.path.display().to_string();
+        let display = if path_str.starts_with("git-gc:") {
+            let repo = path_str.strip_prefix("git-gc:").unwrap_or(&path_str);
+            format!(
+                "git gc --aggressive {}",
+                util::tilde_path(&PathBuf::from(repo))
+            )
+        } else if path_str.starts_with("docker:") {
+            let kind = path_str.strip_prefix("docker:").unwrap_or(&path_str);
+            format!("docker prune {kind}")
+        } else {
+            format!("brew cleanup {path_str}")
+        };
+
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::with_template("{spinner:.cyan} {msg}")
+                .expect("valid template")
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        );
+        spinner.set_message(display.clone());
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
+        let result = if path_str.starts_with("docker:") {
+            docker::clean_docker_entry(&path_str)
+        } else if path_str.starts_with("brew:") {
+            brew::clean_brew_entry(&path_str)
+        } else {
+            git_data::clean_git_gc(&path_str)
+        };
+
+        spinner.finish_and_clear();
+
+        match result {
+            Ok(()) => {
+                cleaned.fetch_add(entry.size, Ordering::Relaxed);
+                println!(
+                    "  {} {} (freed ~{})",
+                    "Done".green(),
+                    display,
+                    util::human_size(entry.size)
+                );
+            }
+            Err(e) => {
+                println!("  {} {display}: {e}", "Failed".red());
+                errors.lock().unwrap().push((entry.path.clone(), e));
+            }
+        }
+    }
+}
+
+/// Measure how many bytes were freed by a clean operation on an entry.
+fn measure_freed(entry: &ScannedEntry, result: &Result<(), io::Error>) -> u64 {
+    if result.is_ok() && !entry.path.exists() {
+        // Fully removed
+        return entry.size;
+    }
+    if entry.path.exists() {
+        let remaining = if entry.path.is_dir() {
+            crate::scanner::walker::dir_size(&entry.path)
+        } else {
+            entry.path.metadata().map_or(0, |m| m.len())
+        };
+        entry.size.saturating_sub(remaining)
+    } else {
+        entry.size
     }
 }
 
