@@ -108,22 +108,20 @@ pub fn dir_size_and_count_bulk(path: &Path) -> (u64, usize) {
 }
 
 #[allow(unsafe_code)]
-fn scan_recursive(
+/// Read directory entries via `getattrlistbulk`, accumulating file sizes and collecting subdirs.
+fn read_dir_bulk(
     dir: &Path,
     total: &mut u64,
-    mut top_level_count: Option<&mut usize>,
+    top_level_count: &mut Option<&mut usize>,
     seen_inodes: &mut rustc_hash::FxHashSet<u64>,
     root_dev: u64,
-    depth: usize,
+    subdirs: &mut Vec<std::path::PathBuf>,
 ) {
-    // Open directory using safe std::fs::File, then extract the raw fd.
     let Ok(dir_file) = std::fs::File::open(dir) else {
         return;
     };
     let fd = dir_file.as_raw_fd();
 
-    // Request DEVID so we can detect volume boundaries from the bulk response
-    // without needing a separate stat() per subdirectory.
     let mut al = AttrList {
         bitmapcount: ATTR_BIT_MAP_COUNT,
         reserved: 0,
@@ -138,8 +136,6 @@ fn scan_recursive(
         fileattr: ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE,
         forkattr: 0,
     };
-
-    let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
 
     SCAN_BUF.with(|cell| {
         let mut buf = cell.borrow_mut();
@@ -159,7 +155,6 @@ fn scan_recursive(
                 break;
             }
             if ret < 0 {
-                // APFS bug: ERANGE at end of directory, retry
                 let err = std::io::Error::last_os_error();
                 if err.raw_os_error() == Some(ERANGE) {
                     continue;
@@ -191,14 +186,12 @@ fn scan_recursive(
                 match parsed {
                     ParsedEntry::File { size, inode, nlink } => {
                         if nlink > 1 && !seen_inodes.insert(inode) {
-                            // Already counted this hard-linked file
                             offset += entry_len;
                             continue;
                         }
                         *total += size;
                     }
                     ParsedEntry::Dir { name, dev } => {
-                        // Skip directories on a different volume (mount points)
                         if root_dev != 0 && dev != 0 && dev != root_dev {
                             offset += entry_len;
                             continue;
@@ -214,9 +207,26 @@ fn scan_recursive(
             }
         }
     });
+}
 
-    // dir_file drops here, closing the fd.
-    drop(dir_file);
+fn scan_recursive(
+    dir: &Path,
+    total: &mut u64,
+    mut top_level_count: Option<&mut usize>,
+    seen_inodes: &mut rustc_hash::FxHashSet<u64>,
+    root_dev: u64,
+    depth: usize,
+) {
+    let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
+
+    read_dir_bulk(
+        dir,
+        total,
+        &mut top_level_count,
+        seen_inodes,
+        root_dev,
+        &mut subdirs,
+    );
 
     // Recurse into subdirectories (no top-level counting for children).
     if depth == 0 && subdirs.len() >= 8 {
@@ -227,7 +237,14 @@ fn scan_recursive(
         subdirs.par_iter().for_each(|subdir| {
             let mut local_total = 0u64;
             let mut local_seen = rustc_hash::FxHashSet::default();
-            scan_recursive(subdir, &mut local_total, None, &mut local_seen, root_dev, depth + 1);
+            scan_recursive(
+                subdir,
+                &mut local_total,
+                None,
+                &mut local_seen,
+                root_dev,
+                depth + 1,
+            );
             shared_total.fetch_add(local_total, Ordering::Relaxed);
         });
         *total += shared_total.load(Ordering::Relaxed);

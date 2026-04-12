@@ -26,8 +26,7 @@ const MAX_SCAN_DEPTH: usize = 6;
 const CACHE_TTL_SECS: u64 = 3600; // 1 hour
 
 /// Default project search roots (relative to home directory).
-const DEFAULT_SEARCH_ROOTS: &[&str] =
-    &["Workspace", "Projects", "Developer", "Code", "src", "dev"];
+const DEFAULT_SEARCH_ROOTS: &[&str] = &["Workspace", "Projects", "Developer", "Code", "src", "dev"];
 
 /// Heavy directories to never recurse into during indexing.
 static SKIP_DIRS: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
@@ -260,8 +259,7 @@ fn dir_mtime(path: &Path) -> u64 {
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 fn walk_dir(dir: &Path, depth: usize, dirs: &mut Vec<IndexedDir>, git_roots: &mut Vec<PathBuf>) {

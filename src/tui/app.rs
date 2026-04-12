@@ -198,17 +198,13 @@ impl App {
                     self.running = false;
                 }
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if max > 0 && self.cursor < max - 1 {
-                    self.cursor += 1;
-                    self.clamp_scroll();
-                }
+            KeyCode::Char('j') | KeyCode::Down if max > 0 && self.cursor < max - 1 => {
+                self.cursor += 1;
+                self.clamp_scroll();
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                    self.clamp_scroll();
-                }
+            KeyCode::Char('k') | KeyCode::Up if self.cursor > 0 => {
+                self.cursor -= 1;
+                self.clamp_scroll();
             }
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if let Some(&row) = visible.get(self.cursor) {
@@ -272,11 +268,9 @@ impl App {
                 self.cursor = 0;
                 self.scroll_offset = 0;
             }
-            KeyCode::Char('G') => {
-                if max > 0 {
-                    self.cursor = max - 1;
-                    self.clamp_scroll();
-                }
+            KeyCode::Char('G') if max > 0 => {
+                self.cursor = max - 1;
+                self.clamp_scroll();
             }
             KeyCode::Char('o') => {
                 if let Some(&RowRef::Entry(ci, gi, ei)) = visible.get(self.cursor) {

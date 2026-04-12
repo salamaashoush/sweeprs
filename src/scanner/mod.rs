@@ -126,6 +126,7 @@ pub fn scan_categories_with_progress(
     config: &Config,
     categories: &[Category],
 ) -> Result<ScanResult> {
+    use rayon::prelude::*;
     configure_thread_pool(config);
     let progress = Arc::new(ScanProgress::new());
     let spinner = ProgressBar::new_spinner();
@@ -173,7 +174,6 @@ pub fn scan_categories_with_progress(
     let start = Instant::now();
 
     // Scan each category in parallel and merge results
-    use rayon::prelude::*;
     let partials: Vec<entry::ScanResult> = categories
         .par_iter()
         .map(|cat| engine.scan_category(*cat, config, Some(&progress)))

@@ -48,7 +48,7 @@ pub fn print_table(result: &ScanResult) {
         }
         // Sort each group internally by size desc
         for group in desc_groups.values_mut() {
-            group.sort_by(|a, b| b.size.cmp(&a.size));
+            group.sort_by_key(|e| std::cmp::Reverse(e.size));
         }
         // Sort groups by total size descending
         desc_groups.sort_by(|_, a, _, b| {
@@ -143,10 +143,7 @@ fn print_disk_info(disk: &DiskInfo) {
     }
     if let Some(icloud) = disk.icloud_local_bytes {
         if icloud > 0 {
-            println!(
-                "iCloud local: {}",
-                util::human_size(icloud).cyan()
-            );
+            println!("iCloud local: {}", util::human_size(icloud).cyan());
         }
     }
     if let Some(tm_reclaim) = disk.tm_reclaimable_bytes {
@@ -159,10 +156,7 @@ fn print_disk_info(disk: &DiskInfo) {
     }
     if let Some(system_app) = disk.system_app_bytes {
         if system_app > 0 {
-            println!(
-                "System + Apps: {}",
-                util::human_size(system_app).dim()
-            );
+            println!("System + Apps: {}", util::human_size(system_app).dim());
         }
     }
     if !disk.other_volumes.is_empty() {

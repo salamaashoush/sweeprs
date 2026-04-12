@@ -262,14 +262,12 @@ impl CleanupRule for OrphanedContainersRule {
 }
 
 /// Collect bundle identifiers of all installed applications.
-fn collect_installed_bundle_ids() -> std::collections::HashSet<String> {
-    let mut bundles = std::collections::HashSet::new();
+fn collect_installed_bundle_ids() -> rustc_hash::FxHashSet<String> {
+    let mut bundles = rustc_hash::FxHashSet::default();
 
     let app_dirs = [
         PathBuf::from("/Applications"),
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join("Applications"),
+        dirs::home_dir().unwrap_or_default().join("Applications"),
     ];
 
     for app_dir in &app_dirs {
@@ -281,7 +279,7 @@ fn collect_installed_bundle_ids() -> std::collections::HashSet<String> {
 
 fn collect_bundles_from(
     dir: &std::path::Path,
-    bundles: &mut std::collections::HashSet<String>,
+    bundles: &mut rustc_hash::FxHashSet<String>,
     depth: u8,
 ) {
     if depth == 0 || !dir.exists() {
@@ -298,10 +296,7 @@ fn collect_bundles_from(
             continue;
         }
 
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
 
         if name.ends_with(".app") {
             // Try to read the bundle ID from Info.plist
@@ -322,7 +317,11 @@ fn read_bundle_id(plist_path: &std::path::Path) -> Option<String> {
     }
     // Use /usr/libexec/PlistBuddy to read the CFBundleIdentifier
     let output = std::process::Command::new("/usr/libexec/PlistBuddy")
-        .args(["-c", "Print :CFBundleIdentifier", &plist_path.to_string_lossy()])
+        .args([
+            "-c",
+            "Print :CFBundleIdentifier",
+            &plist_path.to_string_lossy(),
+        ])
         .output()
         .ok()?;
 

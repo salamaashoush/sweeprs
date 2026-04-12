@@ -94,9 +94,8 @@ impl Tree {
                             .map(|e| {
                                 // Pre-compute lowercased search text once at build time
                                 let path_str = e.path.display().to_string();
-                                let mut search_text = String::with_capacity(
-                                    path_str.len() + 1 + e.description.len(),
-                                );
+                                let mut search_text =
+                                    String::with_capacity(path_str.len() + 1 + e.description.len());
                                 for c in path_str.chars() {
                                     for lc in c.to_lowercase() {
                                         search_text.push(lc);
@@ -119,7 +118,7 @@ impl Tree {
                                 }
                             })
                             .collect();
-                        entry_nodes.sort_by(|a, b| b.size.cmp(&a.size));
+                        entry_nodes.sort_by_key(|e| std::cmp::Reverse(e.size));
 
                         GroupNode {
                             name: name.to_string(),
@@ -132,7 +131,7 @@ impl Tree {
                     })
                     .collect();
 
-                groups.sort_by(|a, b| b.total_size.cmp(&a.total_size));
+                groups.sort_by_key(|g| std::cmp::Reverse(g.total_size));
 
                 CategoryNode {
                     category,
@@ -145,7 +144,7 @@ impl Tree {
             })
             .collect();
 
-        categories.sort_by(|a, b| b.total_size.cmp(&a.total_size));
+        categories.sort_by_key(|c| std::cmp::Reverse(c.total_size));
 
         Self {
             categories,
@@ -230,11 +229,8 @@ impl Tree {
             .categories
             .iter()
             .map(|cat| {
-                let group_states: Vec<CheckState> = cat
-                    .groups
-                    .iter()
-                    .map(compute_group_check_state)
-                    .collect();
+                let group_states: Vec<CheckState> =
+                    cat.groups.iter().map(compute_group_check_state).collect();
                 let cat_state = compute_category_check_state_from_groups(&group_states, cat);
                 (cat_state, group_states)
             })
@@ -265,7 +261,8 @@ impl Tree {
             return states[ci].0;
         }
         let cat = &self.categories[ci];
-        let group_states: Vec<CheckState> = cat.groups.iter().map(compute_group_check_state).collect();
+        let group_states: Vec<CheckState> =
+            cat.groups.iter().map(compute_group_check_state).collect();
         compute_category_check_state_from_groups(&group_states, cat)
     }
 

@@ -167,7 +167,7 @@ fn scan_project_toolchains(dir: &std::path::Path, depth: u8, active: &mut FxHash
         match name_str.as_ref() {
             "node_modules" | "target" | ".git" | ".build" | "vendor" | "build" | "__pycache__"
             | ".venv" | "venv" | ".tox" | "_build" | ".dart_tool" => continue,
-            _ => {},
+            _ => {}
         }
         scan_project_toolchains(&path, depth + 1, active);
     }
@@ -326,13 +326,11 @@ impl CleanupRule for MiseToolchainRule {
 
 /// Collect active mise versions by running `mise current` or reading config files.
 fn collect_active_mise_versions() -> rustc_hash::FxHashMap<String, FxHashSet<String>> {
-    let mut active: rustc_hash::FxHashMap<String, FxHashSet<String>> = rustc_hash::FxHashMap::default();
+    let mut active: rustc_hash::FxHashMap<String, FxHashSet<String>> =
+        rustc_hash::FxHashMap::default();
 
     // Try `mise current` which outputs: "node  22.21.1  ~/.tool-versions"
-    if let Ok(output) = std::process::Command::new("mise")
-        .arg("current")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("mise").arg("current").output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {

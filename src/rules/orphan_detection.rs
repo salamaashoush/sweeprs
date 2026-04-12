@@ -6,10 +6,7 @@ use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::scanner::project_index::PROJECT_INDEX;
 use crate::scanner::walker;
 
-const ORPHAN_MARKERS: &[(&str, &str)] = &[
-    ("target", "Cargo.toml"),
-    (".build", "Package.swift"),
-];
+const ORPHAN_MARKERS: &[(&str, &str)] = &[("target", "Cargo.toml"), (".build", "Package.swift")];
 
 pub struct OrphanedNodeModulesRule;
 
@@ -41,7 +38,7 @@ impl CleanupRule for OrphanedNodeModulesRule {
                 }
 
                 Some(ScannedEntry {
-                    path: dir.to_path_buf(),
+                    path: dir.clone(),
                     size,
                     category: Category::InstalledDeps,
                     safety: SafetyLevel::Safe,
@@ -84,13 +81,11 @@ impl CleanupRule for OrphanedBuildArtifactsRule {
                         }
 
                         Some(ScannedEntry {
-                            path: dir.to_path_buf(),
+                            path: dir.clone(),
                             size,
                             category: Category::BuildArtifact,
                             safety: SafetyLevel::Safe,
-                            description: format!(
-                                "Orphaned {dir_name}/ (no {marker_file})"
-                            ),
+                            description: format!("Orphaned {dir_name}/ (no {marker_file})"),
                             item_count: None,
                         })
                     })

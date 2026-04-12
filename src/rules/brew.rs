@@ -169,8 +169,7 @@ fn parse_brew_size(s: &str) -> u64 {
     num_str
         .trim()
         .parse::<f64>()
-        .map(|n| (n * multiplier as f64) as u64)
-        .unwrap_or(0)
+        .map_or(0, |n| (n * multiplier as f64) as u64)
 }
 
 /// Run the appropriate brew command for a synthetic `brew:` entry.

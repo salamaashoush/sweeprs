@@ -1,4 +1,4 @@
-use crate::rules::{cache_rule, CleanupRule};
+use crate::rules::{CleanupRule, cache_rule};
 use crate::scanner::entry::{Category, SafetyLevel};
 
 cache_rule!(

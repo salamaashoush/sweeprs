@@ -9,7 +9,7 @@ use crate::scanner::walker;
 /// Scan for test and coverage artifacts within discovered projects.
 ///
 /// Uses the shared `PROJECT_INDEX` to avoid redundant directory walks.
-/// Finds pytest_cache, mypy_cache, ruff_cache, htmlcov, nyc_output, and
+/// Finds `pytest_cache`, `mypy_cache`, `ruff_cache`, htmlcov, `nyc_output`, and
 /// coverage directories.
 pub struct TestArtifactsRule;
 

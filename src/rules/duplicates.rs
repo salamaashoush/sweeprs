@@ -69,7 +69,7 @@ impl CleanupRule for DuplicatesRule {
                 if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                     continue;
                 }
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map_or(0, |m| m.len());
                 if size >= min_size {
                     size_groups
                         .entry(size)
@@ -145,7 +145,7 @@ impl CleanupRule for DuplicatesRule {
     }
 }
 
-/// Hash only the first PARTIAL_HASH_SIZE bytes of a file using Xxh3.
+/// Hash only the first `PARTIAL_HASH_SIZE` bytes of a file using Xxh3.
 /// This is a cheap pre-filter: files that differ early avoid full hashing.
 fn hash_file_partial(path: &PathBuf) -> Option<u64> {
     HASH_BUF.with(|cell| {

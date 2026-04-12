@@ -29,7 +29,7 @@ pub struct GeneralConfig {
     #[serde(alias = "defaultCleanCategories")]
     pub default_clean_categories: Vec<String>,
     /// Categories to remove from the default clean list.
-    /// Easier than rewriting default_clean_categories when you only want to skip a few.
+    /// Easier than rewriting `default_clean_categories` when you only want to skip a few.
     /// Example: `["trash", "llm"]` keeps all defaults except trash and LLM models.
     #[serde(alias = "excludeCleanCategories")]
     pub exclude_clean_categories: Vec<String>,
@@ -359,7 +359,7 @@ impl Config {
         }
 
         // Parse the exclude list into a set for O(1) lookup
-        let excludes: std::collections::HashSet<_> = self
+        let excludes: rustc_hash::FxHashSet<_> = self
             .general
             .exclude_clean_categories
             .iter()

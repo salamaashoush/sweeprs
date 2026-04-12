@@ -13,7 +13,7 @@ use crate::scanner::entry::{SafetyLevel, ScannedEntry};
 use crate::util;
 
 /// Remove a directory tree, handling common edge cases:
-/// - Read-only files/dirs (Go modules, node_modules/.cache): chmod before retry
+/// - Read-only files/dirs (Go modules, `node_modules/.cache`): chmod before retry
 /// - Dirs recreated by running apps (Chrome cache): retry once after short delay
 fn remove_dir_robust(path: &Path) -> io::Result<()> {
     match std::fs::remove_dir_all(path) {
@@ -50,14 +50,20 @@ fn fix_permissions(path: &Path) {
     }
 }
 
+/// What to do with cleaned entries.
+pub enum CleanAction {
+    /// Delete entries permanently.
+    Delete,
+    /// Compress directories into .tar.zst (or .tar.gz) archives.
+    /// If the path is Some, archives go there; otherwise next to the original.
+    Archive(Option<PathBuf>),
+}
+
 pub struct CleanOptions {
     pub dry_run: bool,
     pub skip_confirm: bool,
     pub include_unsafe: bool,
-    /// Instead of deleting directories, compress them with tar+zstd.
-    pub archive: bool,
-    /// Custom directory for archives. If None, archives are placed next to the original.
-    pub archive_dir: Option<PathBuf>,
+    pub action: CleanAction,
 }
 
 pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
@@ -154,7 +160,11 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
         return Ok(());
     }
 
-    delete_entries(&filtered, total_size, options.archive, options.archive_dir.as_deref());
+    let (archive, archive_dir) = match &options.action {
+        CleanAction::Archive(dir) => (true, dir.as_deref()),
+        CleanAction::Delete => (false, None),
+    };
+    delete_entries(&filtered, total_size, archive, archive_dir);
     Ok(())
 }
 
@@ -231,7 +241,7 @@ fn delete_entries(
                     let remaining = if entry.path.is_dir() {
                         crate::scanner::walker::dir_size(&entry.path)
                     } else if entry.path.is_file() {
-                        entry.path.metadata().map(|m| m.len()).unwrap_or(0)
+                        entry.path.metadata().map_or(0, |m| m.len())
                     } else {
                         0
                     };
@@ -250,7 +260,7 @@ fn delete_entries(
                     let remaining = if entry.path.is_dir() {
                         crate::scanner::walker::dir_size(&entry.path)
                     } else {
-                        entry.path.metadata().map(|m| m.len()).unwrap_or(0)
+                        entry.path.metadata().map_or(0, |m| m.len())
                     };
                     let freed = entry.size.saturating_sub(remaining);
                     if freed > 0 {

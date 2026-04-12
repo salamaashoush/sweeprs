@@ -14,7 +14,7 @@ const LFS_SIZE_THRESHOLD: u64 = 10 * 1024 * 1024;
 const GIT_GC_THRESHOLD: u64 = 100 * 1024 * 1024; // .git > 100 MB
 const GIT_LOOSE_THRESHOLD: u64 = 256;
 const REFLOG_THRESHOLD: u64 = 5 * 1024 * 1024; // 5 MB
-const RERERE_THRESHOLD: u64 = 1 * 1024 * 1024; // 1 MB
+const RERERE_THRESHOLD: u64 = 1_048_576; // 1 MB
 
 pub struct GitRepoSizeRule;
 pub struct GitLfsCacheRule;
@@ -94,7 +94,7 @@ impl CleanupRule for GitLfsCacheRule {
 // Git gc optimization rule
 // ---------------------------------------------------------------------------
 
-/// Parse `git count-objects -v` output into (loose_count, loose_size_kb, pack_count, garbage_size_kb).
+/// Parse `git count-objects -v` output into (`loose_count`, `loose_size_kb`, `pack_count`, `garbage_size_kb`).
 fn parse_count_objects(output: &str) -> (u64, u64, u64, u64) {
     let mut count = 0u64;
     let mut size = 0u64;
@@ -154,8 +154,7 @@ impl CleanupRule for GitGcRule {
                 }
 
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let (loose_count, _loose_size, _packs, garbage_kb) =
-                    parse_count_objects(&stdout);
+                let (loose_count, _loose_size, _packs, garbage_kb) = parse_count_objects(&stdout);
 
                 // Only suggest gc if there are enough loose objects or garbage
                 if loose_count < GIT_LOOSE_THRESHOLD && garbage_kb == 0 {
@@ -190,10 +189,7 @@ impl CleanupRule for GitGcRule {
                     size: estimated_savings,
                     category: Category::BuildArtifact,
                     safety: SafetyLevel::Caution,
-                    description: format!(
-                        "Git gc: {repo_name} ({})",
-                        desc_parts.join(", ")
-                    ),
+                    description: format!("Git gc: {repo_name} ({})", desc_parts.join(", ")),
                     item_count: None,
                 })
             })
@@ -287,9 +283,7 @@ impl CleanupRule for GitRererecacheRule {
 /// The entry path is expected to be `git-gc:<repo_path>`.
 /// Returns `Ok(())` on success.
 pub fn clean_git_gc(entry_path: &str) -> Result<(), std::io::Error> {
-    let repo_path = entry_path
-        .strip_prefix("git-gc:")
-        .unwrap_or(entry_path);
+    let repo_path = entry_path.strip_prefix("git-gc:").unwrap_or(entry_path);
 
     // Run git gc --aggressive --prune=now
     let status = Command::new("git")

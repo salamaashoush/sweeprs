@@ -25,8 +25,6 @@ impl DockerRule {
                 let stderr = result.stderr.trim();
                 let msg = if stderr.contains("connect:") || stderr.contains("Cannot connect") {
                     "Docker daemon not running (start Colima/Docker Desktop to scan images)"
-                } else if stderr.is_empty() {
-                    "Docker command failed (daemon may not be running)"
                 } else {
                     "Docker command failed (daemon may not be running)"
                 };

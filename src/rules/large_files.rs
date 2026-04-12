@@ -39,7 +39,7 @@ impl CleanupRule for LargeFilesRule {
                     continue;
                 }
 
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map_or(0, |m| m.len());
                 if size >= threshold {
                     let name = entry
                         .path()
@@ -86,7 +86,7 @@ impl CleanupRule for LargeFilesRule {
                     continue;
                 }
 
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map_or(0, |m| m.len());
                 if size >= threshold {
                     let name = path
                         .file_name()

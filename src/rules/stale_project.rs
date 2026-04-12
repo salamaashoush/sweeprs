@@ -46,10 +46,10 @@ fn scan_stale_project(root: &Path, stale_days: u64) -> Vec<ScannedEntry> {
         _ => return Vec::new(),
     };
 
-    let project_name = root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| root.display().to_string());
+    let project_name = root.file_name().map_or_else(
+        || root.display().to_string(),
+        |n| n.to_string_lossy().to_string(),
+    );
 
     let mut entries = Vec::new();
 

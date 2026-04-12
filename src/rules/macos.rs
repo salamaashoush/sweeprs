@@ -1,9 +1,9 @@
 use crate::config::Config;
+use crate::platform;
 use crate::rules::{CleanupRule, cache_rule};
 use crate::scanner::cli_cache;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::scanner::walker;
-use crate::platform;
 
 pub struct TimeMachineSnapshotsRule;
 
@@ -23,13 +23,14 @@ impl CleanupRule for TimeMachineSnapshotsRule {
         };
         if !result.success {
             let stderr = result.stderr.trim();
-            let msg = if stderr.contains("requires root") || stderr.contains("Operation not permitted") {
-                "tmutil failed (requires root privileges)"
-            } else if stderr.is_empty() {
-                "tmutil failed (timed out or not available)"
-            } else {
-                "tmutil failed (check Time Machine configuration)"
-            };
+            let msg =
+                if stderr.contains("requires root") || stderr.contains("Operation not permitted") {
+                    "tmutil failed (requires root privileges)"
+                } else if stderr.is_empty() {
+                    "tmutil failed (timed out or not available)"
+                } else {
+                    "tmutil failed (check Time Machine configuration)"
+                };
             return vec![ScannedEntry {
                 path: std::path::PathBuf::from("/Time Machine Snapshots"),
                 size: 0,

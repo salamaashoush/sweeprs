@@ -37,12 +37,7 @@ impl CleanupRule for EmptyDirsRule {
     }
 }
 
-fn count_empty_dirs(
-    dir: &std::path::Path,
-    count: &mut usize,
-    depth: usize,
-    max_depth: usize,
-) {
+fn count_empty_dirs(dir: &std::path::Path, count: &mut usize, depth: usize, max_depth: usize) {
     if depth > max_depth {
         return;
     }

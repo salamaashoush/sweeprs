@@ -71,10 +71,7 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
             "rustup_active_toolchain",
             &["rustup", "show", "active-toolchain"],
         ),
-        (
-            "rustup_toolchain_list",
-            &["rustup", "toolchain", "list"],
-        ),
+        ("rustup_toolchain_list", &["rustup", "toolchain", "list"]),
         ("node_version", &["node", "--version"]),
         ("python3_version", &["python3", "--version"]),
         ("ruby_version", &["ruby", "--version"]),

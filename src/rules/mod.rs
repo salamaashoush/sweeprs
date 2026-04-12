@@ -24,10 +24,10 @@ pub mod llm;
 pub mod logs;
 pub mod macos;
 pub mod macos_extra;
-pub mod orphan_detection;
-pub mod stale_project;
 pub mod mobile;
+pub mod orphan_detection;
 pub mod pycache;
+pub mod stale_project;
 pub mod system;
 pub mod test_artifacts;
 pub mod toolchain;
@@ -140,9 +140,7 @@ const CLI_CACHE_CATEGORIES: &[Category] = &[
 /// but only the caches that are actually needed for the requested categories.
 /// This prevents rayon thread starvation while avoiding unnecessary work.
 fn warm_caches_for(categories: &[Category]) {
-    let need_cli = categories
-        .iter()
-        .any(|c| CLI_CACHE_CATEGORIES.contains(c));
+    let need_cli = categories.iter().any(|c| CLI_CACHE_CATEGORIES.contains(c));
     let need_project = categories
         .iter()
         .any(|c| PROJECT_INDEX_CATEGORIES.contains(c));
