@@ -1,6 +1,6 @@
 [package]
 name = "sweeprs"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Fast macOS disk cleanup TUI"
 license = "MIT"

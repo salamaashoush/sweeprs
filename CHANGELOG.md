@@ -1,6 +1,34 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.4.0] - 2026-04-12
+
+### Features
+
+- Add diff command and scan history tracking
+- Consolidate auto-clean into monitor, add stale project category
+- Add SafetyLevel::Error for failed scan commands
+- *(toolchain)* Improve Rust toolchain detection and add mise support
+- Add 28 new macOS cleanup rules, fix sparse file sizing, fix Docker reporting
+- Git optimization, archive mode, project index caching, more cleanup targets
+- Optimize defaults for dev machines, add archive_dir config, improve example
+- Add exclude_clean_categories for easy category removal
+
+### Bug Fixes
+
+- Eliminate monitor CPU/memory/thread leaks
+- Detect Colima _disks/ dir and handle deletion errors
+- Handle terminal resize, remove check-state panic, fix stale cursor after expand
+- Resolve all clippy warnings and formatting issues
+
+### Performance
+
+- Smart cache warming, fast disk info, colima detection rewrite
+- Reduce syscalls, cache TUI state, and skip redundant redraws
+
+### Miscellaneous Tasks
+
+- Remove diff command and scan history tracking
 ## [0.3.0] - 2026-02-08
 
 ### Features
