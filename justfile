@@ -274,17 +274,31 @@ changelog-unreleased:
 
 # ==================== CROSS-COMPILATION ====================
 
-# Build for all supported platforms (macOS only - uses objc2/macOS-specific APIs)
+# Build for all supported platforms
 cross-build-all:
-    @echo "Building for all macOS platforms..."
+    @echo "Building for all supported platforms..."
     cargo build --release --target x86_64-apple-darwin
     cargo build --release --target aarch64-apple-darwin
+    cross build --release --target x86_64-unknown-linux-gnu
+    cross build --release --target aarch64-unknown-linux-gnu
+
+# Build only macOS targets (for local dev on macOS)
+cross-build-macos:
+    @echo "Building for macOS..."
+    cargo build --release --target x86_64-apple-darwin
+    cargo build --release --target aarch64-apple-darwin
+
+# Build only Linux targets (requires cross or native Linux)
+cross-build-linux:
+    @echo "Building for Linux..."
+    cross build --release --target x86_64-unknown-linux-gnu
+    cross build --release --target aarch64-unknown-linux-gnu
 
 cross-size:
     @find target -name "sweeprs*" -path "*/release/*" -type f 2>/dev/null | xargs ls -lh 2>/dev/null || echo "No binaries found"
 
 cross-clean:
-    rm -rf target/x86_64-apple-darwin target/aarch64-apple-darwin
+    rm -rf target/x86_64-apple-darwin target/aarch64-apple-darwin target/x86_64-unknown-linux-gnu target/aarch64-unknown-linux-gnu
 
 # ==================== VERSION & RELEASE ====================
 

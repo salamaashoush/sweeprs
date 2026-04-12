@@ -278,30 +278,70 @@ impl App {
                         .path
                         .display()
                         .to_string();
-                    if !path_str.starts_with("docker:") && !path_str.starts_with("brew:") {
-                        let _ = std::process::Command::new("open")
-                            .args(["-R", &path_str])
-                            .spawn();
+                    if !path_str.starts_with("docker:")
+                        && !path_str.starts_with("brew:")
+                        && !path_str.starts_with("journal:")
+                        && !path_str.starts_with("pacman:")
+                        && !path_str.starts_with("apt:")
+                        && !path_str.starts_with("dnf:")
+                    {
+                        if cfg!(target_os = "macos") {
+                            let _ = std::process::Command::new("open")
+                                .args(["-R", &path_str])
+                                .spawn();
+                        } else {
+                            // xdg-open opens the parent directory for files,
+                            // or the directory itself for dirs
+                            let target = std::path::Path::new(&path_str);
+                            let dir = if target.is_file() {
+                                target.parent().map(|p| p.to_string_lossy().to_string())
+                            } else {
+                                Some(path_str.clone())
+                            };
+                            if let Some(dir) = dir {
+                                let _ =
+                                    std::process::Command::new("xdg-open").arg(&dir).spawn();
+                            }
+                        }
                     }
                 }
             }
             KeyCode::Char('y') => {
-                // Copy selected entry path to clipboard
                 if let Some(&RowRef::Entry(ci, gi, ei)) = visible.get(self.cursor) {
                     let path_str = self.tree.categories[ci].groups[gi].entries[ei]
                         .path
                         .display()
                         .to_string();
-                    let _ = std::process::Command::new("pbcopy")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                        .and_then(|mut child| {
-                            if let Some(ref mut stdin) = child.stdin {
-                                use std::io::Write;
-                                stdin.write_all(path_str.as_bytes())?;
-                            }
-                            child.wait()
-                        });
+                    if cfg!(target_os = "macos") {
+                        let _ = std::process::Command::new("pbcopy")
+                            .stdin(std::process::Stdio::piped())
+                            .spawn()
+                            .and_then(|mut child| {
+                                if let Some(ref mut stdin) = child.stdin {
+                                    use std::io::Write;
+                                    stdin.write_all(path_str.as_bytes())?;
+                                }
+                                child.wait()
+                            });
+                    } else {
+                        // Try wl-copy (Wayland) first, fall back to xclip (X11)
+                        let wl = std::process::Command::new("wl-copy")
+                            .arg(&path_str)
+                            .spawn();
+                        if wl.is_err() {
+                            let _ = std::process::Command::new("xclip")
+                                .args(["-selection", "clipboard"])
+                                .stdin(std::process::Stdio::piped())
+                                .spawn()
+                                .and_then(|mut child| {
+                                    if let Some(ref mut stdin) = child.stdin {
+                                        use std::io::Write;
+                                        stdin.write_all(path_str.as_bytes())?;
+                                    }
+                                    child.wait()
+                                });
+                        }
+                    }
                 }
             }
             KeyCode::Char('/') => {

@@ -215,6 +215,12 @@ sweeprs monitor --stop
 
 # Run in foreground (for debugging)
 sweeprs monitor --foreground
+
+# Install as a system service (starts on login)
+sweeprs monitor --install    # launchd on macOS, systemd user service on Linux
+
+# Remove the system service
+sweeprs monitor --uninstall
 ```
 
 ### Shell Completions
@@ -262,8 +268,8 @@ sweeprs config --path
 | `r` | Rescan |
 | `g` | Jump to top |
 | `G` | Jump to bottom |
-| `o` | Reveal in Finder |
-| `y` | Copy path to clipboard |
+| `o` | Open in file manager (Finder on macOS, xdg-open on Linux) |
+| `y` | Copy path to clipboard (pbcopy on macOS, wl-copy/xclip on Linux) |
 | `/` | Search / filter entries |
 | `Esc` | Clear search or go back |
 | `q` | Quit |
@@ -276,20 +282,21 @@ sweeprs config --path
 | Category | CLI Arg | Safety | What it finds |
 |---|---|---|---|
 | Package Caches | `cache` | Safe | npm, yarn, pnpm, bun, cargo, pip, go, maven, bundler, neovim caches |
-| Build Artifacts | `build` | Safe | Rust target/, Xcode, Maven, Gradle, CMake outputs, gitignored dirs |
+| Build Artifacts | `build` | Safe | Rust target/, Maven, Gradle, CMake outputs, Xcode (macOS), gitignored dirs |
 | Installed Dependencies | `deps` | Safe | node_modules/, .venv/, vendor/ |
-| Browser Caches | `browser` | Safe | Chrome, Safari, Firefox caches |
-| IDE Caches | `ide` | Safe | VS Code, Cursor, JetBrains, Xcode caches |
-| App Caches | `app-cache` | Safe | Slack, Spotify, Discord, Teams caches |
+| Browser Caches | `browser` | Safe | Chrome, Firefox, Brave, Edge, Safari (macOS) caches |
+| IDE Caches | `ide` | Safe | VS Code, Cursor, JetBrains, Zed, Sublime, Xcode (macOS) caches |
+| App Caches | `app-cache` | Safe | Slack, Spotify, Discord, Teams, Electron app caches |
 | Rust Toolchains | `toolchain` | Caution | Old rustup toolchains, Python/Node/Ruby versions, Conda environments |
 | Docker | `docker` | Caution | Images, containers, volumes, build cache |
-| Log Files | `logs` | Caution | System logs, diagnostic reports, /var/log, /Library/Logs |
+| Log Files | `logs` | Caution | System logs in /var/log, diagnostic reports, ~/Library/Logs (macOS) |
 | Old Downloads | `downloads` | Caution | Downloads older than configurable age (default 90 days) |
-| macOS Specific | `macos` | Caution | Xcode simulators, QuickLook, Mail caches, Xcode playgrounds |
-| System Junk | `system-junk` | Caution | Temp files (/tmp, $TMPDIR), software update cache, cloud CLI caches |
+| macOS Specific | `macos` | Caution | Xcode simulators, QuickLook, Mail caches, Time Machine snapshots |
+| Linux Specific | `linux` | Caution | systemd journal, pacman/apt/dnf caches, snap, flatpak, old kernels, Steam/Proton, AUR caches |
+| System Junk | `system-junk` | Caution | Temp files (/tmp, $TMPDIR), core dumps, font caches |
 | Mobile Backups | `mobile-backup` | Caution | iOS device backups, Android SDK/emulator caches |
 | LLM Models | `llm` | Caution | Ollama, HuggingFace, LM Studio, GPT4All, Jan AI, llama.cpp |
-| Trash | `trash` | Danger | ~/.Trash contents |
+| Trash | `trash` | Danger | Trash contents (~/.Trash on macOS, ~/.local/share/Trash on Linux) |
 | Large Files | `large-files` | Danger | Files over 500 MB (configurable) |
 | Duplicates | `duplicates` | Danger | Identical files by content hash (disabled by default) |
 
@@ -347,7 +354,9 @@ These are merged with any CLI `--exclude` patterns automatically.
 
 ## Configuration
 
-Config file location: `~/Library/Application Support/sweeprs/config.toml` (macOS)
+Config file location:
+- macOS: `~/Library/Application Support/sweeprs/config.toml`
+- Linux: `~/.config/sweeprs/config.toml`
 
 Generate a default config with `sweeprs config --init`.
 
@@ -404,6 +413,7 @@ old_download = true
 large_file = true
 duplicate = false               # Disabled by default
 macos_specific = true
+linux_specific = true
 app_cache = true
 system_junk = true
 mobile_backup = true
@@ -448,6 +458,7 @@ Use these names with `sweeprs scan --category` or `sweeprs clean`:
 | `large-files` | Large Files |
 | `duplicates` | Duplicates |
 | `macos` | macOS Specific |
+| `linux` | Linux Specific |
 | `app-cache` | App Caches |
 | `system-junk` | System Junk |
 | `mobile-backup` | Mobile Backups |
@@ -487,6 +498,7 @@ src/
     downloads.rs     Old downloads
     large_files.rs   Large file detection
     duplicates.rs    XXH3-based duplicate detection
+    linux.rs         Linux-specific scanning (systemd, pacman/apt/dnf, snap, flatpak, Steam, kernels)
     macos.rs         macOS-specific caches and data
     system.rs        System temp files and junk
     mobile.rs        Mobile device backups

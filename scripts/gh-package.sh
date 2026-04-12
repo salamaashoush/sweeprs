@@ -36,8 +36,8 @@ package_binary() {
     fi
 }
 
-# Package all targets (macOS only - uses objc2/macOS-specific APIs)
-for target in x86_64-apple-darwin aarch64-apple-darwin; do
+# Package all targets
+for target in x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
     package_binary "$target"
 done
 
