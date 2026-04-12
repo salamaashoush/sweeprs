@@ -11,7 +11,6 @@ use crate::scanner::walker;
 
 const LFS_SIZE_THRESHOLD: u64 = 10 * 1024 * 1024;
 const GIT_GC_THRESHOLD: u64 = 100 * 1024 * 1024; // .git > 100 MB
-const GIT_LOOSE_THRESHOLD: u64 = 256;
 const REFLOG_THRESHOLD: u64 = 5 * 1024 * 1024; // 5 MB
 const RERERE_THRESHOLD: u64 = 1_048_576; // 1 MB
 
@@ -105,49 +104,38 @@ impl CleanupRule for GitGcRule {
                     return None;
                 }
 
-                // Run git count-objects -v with a 3-second timeout
-                let output = Command::new("git")
-                    .args(["-C", &root.display().to_string(), "count-objects", "-v"])
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
-                    .output()
-                    .ok()?;
-
-                if !output.status.success() {
-                    return None;
-                }
-
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let (loose_count, _loose_size, _packs, garbage_kb) = parse_count_objects(&stdout);
-
-                // Only suggest gc if there are enough loose objects or garbage
-                if loose_count < GIT_LOOSE_THRESHOLD && garbage_kb == 0 {
-                    return None;
-                }
-
                 let repo_name = root
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
 
-                // Estimate reclaimable: loose objects size + garbage.
-                // Actual savings from gc --aggressive can be 10-30% of .git size.
-                // Use a conservative 10% estimate for repos with many loose objects.
-                let estimated_savings = if garbage_kb > 0 {
-                    garbage_kb * 1024 + (git_size / 10)
-                } else {
-                    git_size / 10
-                };
+                // Try to get object stats for a richer description
+                let mut desc_parts = vec![format!(".git {}", crate::util::human_size(git_size))];
+                let mut estimated_savings = git_size / 10; // conservative 10% estimate
 
-                let mut desc_parts = Vec::new();
-                if loose_count > 0 {
-                    desc_parts.push(format!("{loose_count} loose objects"));
-                }
-                if garbage_kb > 0 {
-                    desc_parts.push(format!("{garbage_kb} KB garbage"));
+                if let Some(output) = Command::new("git")
+                    .args(["-C", &root.display().to_string(), "count-objects", "-v"])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let (loose_count, _loose_size, _packs, garbage_kb) =
+                        parse_count_objects(&stdout);
+
+                    if loose_count > 0 {
+                        desc_parts.push(format!("{loose_count} loose objects"));
+                    }
+                    if garbage_kb > 0 {
+                        desc_parts.push(format!("{garbage_kb} KB garbage"));
+                        estimated_savings = garbage_kb * 1024 + (git_size / 10);
+                    }
                 }
 
+                // Use git-gc: synthetic path so cleaning runs git gc, not rm -rf
                 Some(ScannedEntry {
                     path: PathBuf::from(format!("git-gc:{}", root.display())),
                     size: estimated_savings,
