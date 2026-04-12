@@ -47,6 +47,9 @@ const KNOWN_CACHE_DIRS: &[&str] = &[
     "com.apple.logic10",
     "com.apple.iMovieApp",
     "com.apple.wallpaper",
+    // dev_caches additions
+    "coursier",
+    "helm",
 ];
 
 const KNOWN_APP_SUPPORT_DIRS: &[&str] = &[

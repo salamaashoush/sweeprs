@@ -146,6 +146,8 @@ fn run_auto_clean(config: &Config) {
         dry_run: false,
         skip_confirm: true,
         include_unsafe: false,
+        archive: false,
+        archive_dir: None,
     };
 
     if let Err(e) = cleaner::clean(&safe_entries, &options) {

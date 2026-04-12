@@ -148,6 +148,22 @@ cache_rule!(
     ".m2/wrapper/dists"
 );
 
+cache_rule!(
+    CargoGitCheckoutsRule,
+    "Cargo git checkouts",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cargo/git/checkouts"
+);
+
+cache_rule!(
+    CargoGitDbRule,
+    "Cargo git db",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cargo/git/db"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(NpmCacheRule),
@@ -168,5 +184,7 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(NeovimCacheRule),
         Box::new(BundlerCacheRule),
         Box::new(MavenWrapperRule),
+        Box::new(CargoGitCheckoutsRule),
+        Box::new(CargoGitDbRule),
     ]
 }

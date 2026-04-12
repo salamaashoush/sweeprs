@@ -155,6 +155,30 @@ cache_rule!(
     "Library/Caches/com.raycast.macos"
 );
 
+cache_rule!(
+    ChromeCodeCacheRule,
+    "Chrome Code Cache",
+    Category::AppCache,
+    SafetyLevel::Safe,
+    "Library/Application Support/Google/Chrome/Default/Code Cache"
+);
+
+cache_rule!(
+    ChromeServiceWorkerRule,
+    "Chrome Service Worker cache",
+    Category::AppCache,
+    SafetyLevel::Safe,
+    "Library/Application Support/Google/Chrome/Default/Service Worker/CacheStorage"
+);
+
+cache_rule!(
+    FirefoxOfflineCacheRule,
+    "Firefox profile cache",
+    Category::AppCache,
+    SafetyLevel::Safe,
+    "Library/Caches/Firefox/Profiles"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(SlackCacheRule),
@@ -176,5 +200,8 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(CanvaCacheRule),
         Box::new(GrammarlyCacheRule),
         Box::new(RaycastCacheRule),
+        Box::new(ChromeCodeCacheRule),
+        Box::new(ChromeServiceWorkerRule),
+        Box::new(FirefoxOfflineCacheRule),
     ]
 }

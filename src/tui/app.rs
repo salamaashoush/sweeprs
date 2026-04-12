@@ -1,15 +1,19 @@
 use std::sync::mpsc;
 use std::thread;
+use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::config::Config;
-use crate::rules::{brew, docker};
+use crate::rules::{brew, docker, git_data};
 use crate::scanner;
 use crate::scanner::ScanUpdate;
 use crate::scanner::entry::{ScanResult, ScannedEntry};
 use crate::tui::tree::{RowRef, Tree};
 use crate::tui::views::View;
+
+/// Maximum age of a cached scan result before it's ignored (2 hours).
+const SCAN_CACHE_TTL_SECS: u64 = 7200;
 
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
@@ -34,12 +38,18 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
+        // Try to load a cached scan result for instant startup
+        let cached = Self::load_scan_cache();
+        let has_cache = cached.is_some();
+        let result = cached.unwrap_or_default();
+        let tree = Tree::from_scan_result(&result);
+
         Self {
             running: true,
             view: View::Main,
-            result: ScanResult::default(),
+            result,
             scanning: false,
-            tree: Tree::from_scan_result(&ScanResult::default()),
+            tree,
             cursor: 0,
             scroll_offset: 0,
             selected_for_deletion: Vec::new(),
@@ -47,7 +57,11 @@ impl App {
             scan_receiver: None,
             scan_rules_done: 0,
             scan_rules_total: 0,
-            last_rule_name: String::new(),
+            last_rule_name: if has_cache {
+                "cached result, rescanning...".to_owned()
+            } else {
+                String::new()
+            },
             search_query: String::new(),
             search_active: false,
             needs_redraw: true,
@@ -108,6 +122,8 @@ impl App {
         if finished {
             self.scanning = false;
             self.scan_receiver = None;
+            // Save scan result for instant startup next time
+            Self::save_scan_cache(&self.result);
         }
 
         if got_updates || finished {
@@ -361,6 +377,10 @@ impl App {
                 let _ = brew::clean_brew_entry(&path_str);
                 continue;
             }
+            if path_str.starts_with("git-gc:") {
+                let _ = git_data::clean_git_gc(&path_str);
+                continue;
+            }
 
             let path = &entry.path;
             if path.is_dir() {
@@ -370,5 +390,37 @@ impl App {
             }
         }
         self.selected_for_deletion.clear();
+    }
+
+    fn scan_cache_path() -> std::path::PathBuf {
+        dirs::cache_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .join("sweeprs")
+            .join("last_scan.json")
+    }
+
+    fn load_scan_cache() -> Option<ScanResult> {
+        let path = Self::scan_cache_path();
+        let data = std::fs::read_to_string(&path).ok()?;
+
+        // Check file modification time for TTL
+        let metadata = std::fs::metadata(&path).ok()?;
+        let modified = metadata.modified().ok()?;
+        let age = SystemTime::now().duration_since(modified).ok()?;
+        if age.as_secs() > SCAN_CACHE_TTL_SECS {
+            return None;
+        }
+
+        serde_json::from_str(&data).ok()
+    }
+
+    fn save_scan_cache(result: &ScanResult) {
+        let path = Self::scan_cache_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(result) {
+            let _ = std::fs::write(&path, json);
+        }
     }
 }

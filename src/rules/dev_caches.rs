@@ -99,6 +99,62 @@ cache_rule!(
     ".triton/cache"
 );
 
+cache_rule!(
+    GradleWrapperDistsRule,
+    "Gradle wrapper distributions",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".gradle/wrapper/dists"
+);
+
+cache_rule!(
+    SdkmanArchivesRule,
+    "SDKMAN archives",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".sdkman/archives"
+);
+
+cache_rule!(
+    AsdfDownloadsRule,
+    "asdf downloads",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".asdf/downloads"
+);
+
+cache_rule!(
+    CoursierCacheRule,
+    "Coursier cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cache/coursier"
+);
+
+cache_rule!(
+    HelmCacheRule,
+    "Helm cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cache/helm"
+);
+
+cache_rule!(
+    MinikubeCacheRule,
+    "Minikube cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".minikube/cache"
+);
+
+cache_rule!(
+    TerraformPluginsRule,
+    "Terraform plugin cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".terraform.d/plugins"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(BazelCacheRule),
@@ -113,5 +169,12 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(TorchCacheRule),
         Box::new(KerasCacheRule),
         Box::new(TritonCacheRule),
+        Box::new(GradleWrapperDistsRule),
+        Box::new(SdkmanArchivesRule),
+        Box::new(AsdfDownloadsRule),
+        Box::new(CoursierCacheRule),
+        Box::new(HelmCacheRule),
+        Box::new(MinikubeCacheRule),
+        Box::new(TerraformPluginsRule),
     ]
 }

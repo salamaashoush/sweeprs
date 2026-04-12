@@ -77,6 +77,12 @@ enum Command {
         /// Only clean entries at least this large (e.g. 1G, 500M, 100K)
         #[arg(long)]
         min_size: Option<String>,
+        /// Compress directories into .tar.zst archives instead of deleting
+        #[arg(long)]
+        archive: bool,
+        /// Directory to store archives (default: next to original)
+        #[arg(long)]
+        archive_dir: Option<String>,
     },
     /// Background disk usage monitor
     Monitor {
@@ -316,6 +322,8 @@ fn main() -> Result<()> {
             filters,
             exclude,
             min_size,
+            archive,
+            archive_dir,
         }) => {
             let config = config::Config::load()?;
 
@@ -363,6 +371,8 @@ fn main() -> Result<()> {
                 dry_run: !force,
                 skip_confirm: yes,
                 include_unsafe,
+                archive,
+                archive_dir: archive_dir.map(std::path::PathBuf::from),
             };
             cleaner::clean(&result.entries, &options)?;
         }

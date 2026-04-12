@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use yansi::Paint;
 
-use crate::rules::{brew, docker};
+use crate::rules::{brew, docker, git_data};
 use crate::scanner::entry::{SafetyLevel, ScannedEntry};
 use crate::util;
 
@@ -54,6 +54,10 @@ pub struct CleanOptions {
     pub dry_run: bool,
     pub skip_confirm: bool,
     pub include_unsafe: bool,
+    /// Instead of deleting directories, compress them with tar+zstd.
+    pub archive: bool,
+    /// Custom directory for archives. If None, archives are placed next to the original.
+    pub archive_dir: Option<PathBuf>,
 }
 
 pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
@@ -150,7 +154,7 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
         return Ok(());
     }
 
-    delete_entries(&filtered, total_size);
+    delete_entries(&filtered, total_size, options.archive, options.archive_dir.as_deref());
     Ok(())
 }
 
@@ -172,12 +176,18 @@ fn confirm_deletion(entries: &[&ScannedEntry]) -> Result<bool> {
     Ok(input.trim().eq_ignore_ascii_case("y"))
 }
 
-fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
+fn delete_entries(
+    entries: &[&ScannedEntry],
+    total_size: u64,
+    archive: bool,
+    archive_dir: Option<&Path>,
+) {
+    let action = if archive { "Archiving" } else { "Deleting" };
     let bar = ProgressBar::new(entries.len() as u64);
     bar.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.green} Deleting [{bar:30.green/dim}] {pos}/{len} items  {msg}",
-        )
+        ProgressStyle::with_template(&format!(
+            "{{spinner:.green}} {action} [{{bar:30.green/dim}}] {{pos}}/{{len}} items  {{msg}}"
+        ))
         .expect("valid template")
         .progress_chars("=>-"),
     );
@@ -188,12 +198,18 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
     entries.par_iter().for_each(|entry| {
         let path_str = entry.path.display().to_string();
 
-        let is_synthetic = path_str.starts_with("docker:") || path_str.starts_with("brew:");
+        let is_synthetic = path_str.starts_with("docker:")
+            || path_str.starts_with("brew:")
+            || path_str.starts_with("git-gc:");
 
         let result = if path_str.starts_with("docker:") {
             docker::clean_docker_entry(&path_str)
         } else if path_str.starts_with("brew:") {
             brew::clean_brew_entry(&path_str)
+        } else if path_str.starts_with("git-gc:") {
+            git_data::clean_git_gc(&path_str)
+        } else if archive && entry.path.is_dir() {
+            archive_directory(&entry.path, archive_dir)
         } else if entry.path.is_dir() {
             remove_dir_robust(&entry.path)
         } else if entry.path.is_file() {
@@ -210,7 +226,8 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
                 let freed = if is_synthetic || !entry.path.exists() {
                     entry.size
                 } else {
-                    // Partial deletion: measure what remains and subtract
+                    // Partial deletion or archive: measure what remains and subtract.
+                    // For archives, the archive file is smaller than the original.
                     let remaining = if entry.path.is_dir() {
                         crate::scanner::walker::dir_size(&entry.path)
                     } else if entry.path.is_file() {
@@ -251,7 +268,8 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
     let cleaned = cleaned.load(Ordering::Relaxed);
     let errors = errors.into_inner().unwrap();
 
-    println!("\nCleaned: {}", util::human_size(cleaned).green().bold());
+    let verb = if archive { "Archived" } else { "Cleaned" };
+    println!("\n{verb}: {}", util::human_size(cleaned).green().bold());
 
     if !errors.is_empty() {
         println!("\nErrors:");
@@ -259,4 +277,85 @@ fn delete_entries(entries: &[&ScannedEntry], total_size: u64) {
             println!("  {} {}: {err}", "Failed".red(), util::tilde_path(path));
         }
     }
+}
+
+/// Compress a directory into a .tar.zst (or .tar.gz fallback) archive, then remove the original.
+/// If `archive_dir` is Some, the archive is placed there; otherwise next to the original.
+fn archive_directory(dir: &Path, archive_dir: Option<&Path>) -> io::Result<()> {
+    let dir_name = dir
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no directory name"))?
+        .to_string_lossy();
+
+    let parent = dir
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no parent directory"))?;
+
+    let dest_dir = archive_dir.unwrap_or(parent);
+
+    // Ensure destination directory exists
+    if !dest_dir.exists() {
+        std::fs::create_dir_all(dest_dir)?;
+    }
+
+    // Try zstd first (faster, better compression), fall back to gzip
+    let has_zstd = std::process::Command::new("zstd")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if has_zstd {
+        let archive_path = dest_dir.join(format!("{dir_name}.tar.zst"));
+
+        // tar -cf - -C <parent> <dirname> | zstd -T0 -3 -o <archive>
+        let tar = std::process::Command::new("tar")
+            .args(["-cf", "-", "-C", &parent.display().to_string(), &dir_name])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+
+        let zstd_status = std::process::Command::new("zstd")
+            .args([
+                "-T0",
+                "-3",
+                "--rm",
+                "-o",
+                &archive_path.display().to_string(),
+            ])
+            .stdin(tar.stdout.unwrap())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+
+        if !zstd_status.success() {
+            // Clean up partial archive
+            let _ = std::fs::remove_file(&archive_path);
+            return Err(io::Error::other("zstd compression failed"));
+        }
+    } else {
+        // Fallback: gzip
+        let archive_path = dest_dir.join(format!("{dir_name}.tar.gz"));
+
+        let status = std::process::Command::new("tar")
+            .args([
+                "-czf",
+                &archive_path.display().to_string(),
+                "-C",
+                &parent.display().to_string(),
+                &dir_name,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+
+        if !status.success() {
+            let _ = std::fs::remove_file(&archive_path);
+            return Err(io::Error::other("tar compression failed"));
+        }
+    }
+
+    // Archive created successfully, remove the original directory
+    remove_dir_robust(dir)
 }
