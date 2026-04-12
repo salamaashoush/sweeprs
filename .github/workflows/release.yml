@@ -13,19 +13,19 @@ env:
 jobs:
   build:
     name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-apple-darwin
-            os: macos-latest
+            runner: macos-13
           - target: aarch64-apple-darwin
-            os: macos-latest
+            runner: macos-14
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            runner: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -38,22 +38,19 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools
+      - name: Install aarch64 Linux cross-compiler
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-gcc' || '' }}
 
       - name: Package
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar -czf ../../../sweeprs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz sweeprs
-          cd ../../..
+        run: tar -czf sweeprs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release sweeprs
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -67,6 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -74,13 +73,23 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: List artifacts
+        run: ls -lh artifacts/
+
       - name: Generate changelog
-        id: changelog
         run: |
+          # Try git-cliff, fall back to simple git log
           if command -v git-cliff &> /dev/null; then
             git cliff --latest --strip header > RELEASE_NOTES.md
           else
-            echo "Release ${{ github.ref_name }}" > RELEASE_NOTES.md
+            PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
+            if [ -n "$PREV_TAG" ]; then
+              echo "## Changes since ${PREV_TAG}" > RELEASE_NOTES.md
+              echo "" >> RELEASE_NOTES.md
+              git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" >> RELEASE_NOTES.md
+            else
+              echo "Release ${{ github.ref_name }}" > RELEASE_NOTES.md
+            fi
           fi
 
       - name: Create GitHub Release
