@@ -61,6 +61,8 @@ pub struct ScanProgress {
     pub bytes_found: AtomicU64,
     pub items_found: AtomicUsize,
     pub current_rule: std::sync::Mutex<String>,
+    /// 0 = warming caches, 1 = scanning rules, 2 = collecting disk info
+    pub phase: AtomicUsize,
 }
 
 impl ScanProgress {
@@ -71,6 +73,7 @@ impl ScanProgress {
             bytes_found: AtomicU64::new(0),
             items_found: AtomicUsize::new(0),
             current_rule: std::sync::Mutex::new(String::new()),
+            phase: AtomicUsize::new(0),
         }
     }
 }
@@ -188,6 +191,10 @@ impl RuleEngine {
 
         warm_caches_all();
 
+        if let Some(p) = progress {
+            p.phase.store(1, Ordering::Relaxed);
+        }
+
         let filtered_rules: Vec<_> = RULES
             .iter()
             .filter(|rule| config.is_category_enabled(rule.category()))
@@ -259,6 +266,10 @@ impl RuleEngine {
         use rayon::prelude::*;
 
         warm_caches_for(&[category]);
+
+        if let Some(p) = progress {
+            p.phase.store(1, Ordering::Relaxed);
+        }
 
         let filtered_rules: Vec<_> = RULES
             .iter()

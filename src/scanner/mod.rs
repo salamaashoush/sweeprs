@@ -23,6 +23,59 @@ use crate::util;
 
 use entry::{Category, ScanResult};
 
+/// Spawn a background thread that updates a spinner with scan progress.
+/// Returns a `JoinHandle` that should be joined after scanning completes.
+fn spawn_progress_ticker(
+    progress: Arc<ScanProgress>,
+    spinner: ProgressBar,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        loop {
+            let phase = progress.phase.load(Ordering::Relaxed);
+            let done = progress.rules_done.load(Ordering::Relaxed);
+            let total = progress.rules_total.load(Ordering::Relaxed);
+            let bytes = progress.bytes_found.load(Ordering::Relaxed);
+            let items = progress.items_found.load(Ordering::Relaxed);
+
+            match phase {
+                0 => {
+                    spinner.set_message("Warming caches (docker, brew, rustup, project index)...");
+                }
+                _ => {
+                    if total > 0 {
+                        let current = progress
+                            .current_rule
+                            .lock()
+                            .map(|n| n.clone())
+                            .unwrap_or_default();
+                        spinner.set_message(format!(
+                            "Scanning {done}/{total} rules | {items} items | {} | {current}",
+                            util::human_size(bytes),
+                        ));
+                    }
+                }
+            }
+
+            if phase >= 1 && done > 0 && done >= total && total > 0 {
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(80));
+        }
+    })
+}
+
+fn new_scan_spinner() -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
+            .expect("valid template")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+    );
+    spinner.set_message("Starting scan...");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+    spinner
+}
+
 /// Configure rayon's global thread pool from the user's `scan.threads` setting.
 /// If non-zero, limits the thread pool to that many threads.
 /// Must be called before any rayon parallel iteration.
@@ -58,51 +111,15 @@ pub fn scan_category(config: &Config, category: Category) -> Result<ScanResult> 
 pub fn scan_all_with_progress(config: &Config) -> Result<ScanResult> {
     configure_thread_pool(config);
     let progress = Arc::new(ScanProgress::new());
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
-            .expect("valid template")
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
-    );
-    spinner.set_message("Scanning...");
-    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
-
-    let progress_clone = Arc::clone(&progress);
-    let spinner_clone = spinner.clone();
-    let tick_handle = thread::spawn(move || {
-        loop {
-            let done = progress_clone.rules_done.load(Ordering::Relaxed);
-            let total = progress_clone.rules_total.load(Ordering::Relaxed);
-            let bytes = progress_clone.bytes_found.load(Ordering::Relaxed);
-            let items = progress_clone.items_found.load(Ordering::Relaxed);
-
-            if total > 0 {
-                let current = progress_clone
-                    .current_rule
-                    .lock()
-                    .map(|n| n.clone())
-                    .unwrap_or_default();
-                spinner_clone.set_message(format!(
-                    "Scanning... {done}/{total} rules | {items} items | {} | {current}",
-                    util::human_size(bytes),
-                ));
-            }
-
-            if done > 0 && done >= total && total > 0 {
-                break;
-            }
-            thread::sleep(std::time::Duration::from_millis(80));
-        }
-    });
+    let spinner = new_scan_spinner();
+    let tick_handle = spawn_progress_ticker(Arc::clone(&progress), spinner.clone());
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
     let mut result = engine.scan_all(config, Some(&progress));
-    let duration = start.elapsed();
-    result.scan_duration_secs = Some(duration.as_secs_f64());
+    result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
 
     let _ = tick_handle.join();
-
     spinner.finish_and_clear();
 
     result.disk_info = Some(platform::get_disk_info()?);
@@ -129,51 +146,12 @@ pub fn scan_categories_with_progress(
     use rayon::prelude::*;
     configure_thread_pool(config);
     let progress = Arc::new(ScanProgress::new());
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
-            .expect("valid template")
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
-    );
-    let cat_names: Vec<_> = categories
-        .iter()
-        .map(std::string::ToString::to_string)
-        .collect();
-    spinner.set_message(format!("Scanning {}...", cat_names.join(", ")));
-    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
-
-    let progress_clone = Arc::clone(&progress);
-    let spinner_clone = spinner.clone();
-    let tick_handle = thread::spawn(move || {
-        loop {
-            let done = progress_clone.rules_done.load(Ordering::Relaxed);
-            let total = progress_clone.rules_total.load(Ordering::Relaxed);
-            let bytes = progress_clone.bytes_found.load(Ordering::Relaxed);
-            let items = progress_clone.items_found.load(Ordering::Relaxed);
-
-            if total > 0 {
-                let current = progress_clone
-                    .current_rule
-                    .lock()
-                    .map(|n| n.clone())
-                    .unwrap_or_default();
-                spinner_clone.set_message(format!(
-                    "Scanning... {done}/{total} rules | {items} items | {} | {current}",
-                    util::human_size(bytes),
-                ));
-            }
-
-            if done > 0 && done >= total && total > 0 {
-                break;
-            }
-            thread::sleep(std::time::Duration::from_millis(80));
-        }
-    });
+    let spinner = new_scan_spinner();
+    let tick_handle = spawn_progress_ticker(Arc::clone(&progress), spinner.clone());
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
 
-    // Scan each category in parallel and merge results
     let partials: Vec<entry::ScanResult> = categories
         .par_iter()
         .map(|cat| engine.scan_category(*cat, config, Some(&progress)))
@@ -196,51 +174,15 @@ pub fn scan_categories_with_progress(
 pub fn scan_category_with_progress(config: &Config, category: Category) -> Result<ScanResult> {
     configure_thread_pool(config);
     let progress = Arc::new(ScanProgress::new());
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
-            .expect("valid template")
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
-    );
-    spinner.set_message(format!("Scanning {category}..."));
-    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
-
-    let progress_clone = Arc::clone(&progress);
-    let spinner_clone = spinner.clone();
-    let tick_handle = thread::spawn(move || {
-        loop {
-            let done = progress_clone.rules_done.load(Ordering::Relaxed);
-            let total = progress_clone.rules_total.load(Ordering::Relaxed);
-            let bytes = progress_clone.bytes_found.load(Ordering::Relaxed);
-            let items = progress_clone.items_found.load(Ordering::Relaxed);
-
-            if total > 0 {
-                let current = progress_clone
-                    .current_rule
-                    .lock()
-                    .map(|n| n.clone())
-                    .unwrap_or_default();
-                spinner_clone.set_message(format!(
-                    "Scanning... {done}/{total} rules | {items} items | {} | {current}",
-                    util::human_size(bytes),
-                ));
-            }
-
-            if done > 0 && done >= total && total > 0 {
-                break;
-            }
-            thread::sleep(std::time::Duration::from_millis(80));
-        }
-    });
+    let spinner = new_scan_spinner();
+    let tick_handle = spawn_progress_ticker(Arc::clone(&progress), spinner.clone());
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
     let mut result = engine.scan_category(category, config, Some(&progress));
-    let duration = start.elapsed();
-    result.scan_duration_secs = Some(duration.as_secs_f64());
+    result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
 
     let _ = tick_handle.join();
-
     spinner.finish_and_clear();
 
     result.disk_info = Some(platform::get_disk_info_fast()?);

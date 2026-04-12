@@ -159,7 +159,6 @@ impl Default for GeneralConfig {
                 "stale-project".to_owned(),
                 "docker".to_owned(),
                 "toolchain".to_owned(),
-                "downloads".to_owned(),
                 "trash".to_owned(),
                 "llm".to_owned(),
                 "mobile-backup".to_owned(),

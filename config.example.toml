@@ -34,10 +34,10 @@ default_clean_categories = [
     "stale-project",  # build/deps dirs in git repos with no commits for 60+ days
     "docker",         # Docker images, build cache, Colima VMs and disks
     "toolchain",      # old Rust/Python/Node/Ruby/Java toolchain versions
-    "downloads",      # files in ~/Downloads older than download_age_days
     "trash",          # ~/.Trash contents
     "llm",            # LLM models (Ollama, HuggingFace, LM Studio, GPT4All)
     "mobile-backup",  # iOS backups, Xcode device support files
+    # "downloads",    # opt-in: old files in ~/Downloads -- uncomment to include
 ]
 
 # Instead of rewriting the full list above, you can exclude specific categories:
