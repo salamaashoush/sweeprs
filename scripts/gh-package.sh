@@ -37,7 +37,7 @@ package_binary() {
 }
 
 # Package all targets
-for target in x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+for target in aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
     package_binary "$target"
 done
 

@@ -19,9 +19,16 @@ esac
 # Detect architecture
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)  ARCH_TARGET="x86_64" ;;
-    arm64)   ARCH_TARGET="aarch64" ;;
-    aarch64) ARCH_TARGET="aarch64" ;;
+    x86_64)
+        if [ "$OS" = "Darwin" ]; then
+            echo "Intel Macs are no longer supported. Use Apple Silicon."
+            exit 1
+        fi
+        ARCH_TARGET="x86_64"
+        ;;
+    arm64|aarch64)
+        ARCH_TARGET="aarch64"
+        ;;
     *)
         echo "Unsupported architecture: $ARCH"
         exit 1

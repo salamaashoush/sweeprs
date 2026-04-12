@@ -278,15 +278,13 @@ changelog-unreleased:
 # Build for all supported platforms
 cross-build-all:
     @echo "Building for all supported platforms..."
-    cargo build --release --target x86_64-apple-darwin
     cargo build --release --target aarch64-apple-darwin
     cross build --release --target x86_64-unknown-linux-gnu
     cross build --release --target aarch64-unknown-linux-gnu
 
-# Build only macOS targets (for local dev on macOS)
+# Build only macOS target (Apple Silicon)
 cross-build-macos:
     @echo "Building for macOS..."
-    cargo build --release --target x86_64-apple-darwin
     cargo build --release --target aarch64-apple-darwin
 
 # Build only Linux targets (requires cross or native Linux)
@@ -299,7 +297,7 @@ cross-size:
     @find target -name "sweeprs*" -path "*/release/*" -type f 2>/dev/null | xargs ls -lh 2>/dev/null || echo "No binaries found"
 
 cross-clean:
-    rm -rf target/x86_64-apple-darwin target/aarch64-apple-darwin target/x86_64-unknown-linux-gnu target/aarch64-unknown-linux-gnu
+    rm -rf target/aarch64-apple-darwin target/x86_64-unknown-linux-gnu target/aarch64-unknown-linux-gnu
 
 # ==================== VERSION & RELEASE ====================
 
