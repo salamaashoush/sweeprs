@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use yansi::Paint;
 
 use crate::rules::{brew, docker, git_data};
-use crate::scanner::entry::{SafetyLevel, ScannedEntry};
+use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::util;
 
 /// Remove a directory tree, handling common edge cases:
@@ -87,7 +87,8 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
                 format!(
                     "No safe items to clean. {} in Caution/Danger items skipped (use --all to include).",
                     util::human_size(skipped)
-                ).dim()
+                )
+                .dim()
             );
         } else {
             println!("{}", "Nothing to clean.".dim());
@@ -95,45 +96,104 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
         return Ok(());
     }
 
+    let category_groups = group_by_category(&filtered);
     let total_size: u64 = filtered.iter().map(|e| e.size).sum();
+    print_clean_summary(
+        &category_groups,
+        &filtered,
+        entries,
+        total_size,
+        options.dry_run,
+        options.include_unsafe,
+    );
 
+    if options.dry_run {
+        println!(
+            "\n{}",
+            "Dry run - no files were deleted. Use --force to delete.".yellow()
+        );
+        return Ok(());
+    }
+
+    let (to_clean, clean_size) = if options.skip_confirm {
+        (filtered, total_size)
+    } else {
+        let selected = interactive_confirm(&category_groups)?;
+        if selected.is_empty() {
+            println!("Cancelled.");
+            return Ok(());
+        }
+        let to_clean: Vec<&ScannedEntry> = filtered
+            .into_iter()
+            .filter(|e| selected.contains(&e.category))
+            .collect();
+        let size = to_clean.iter().map(|e| e.size).sum();
+        (to_clean, size)
+    };
+
+    if to_clean.is_empty() {
+        println!("Nothing selected.");
+        return Ok(());
+    }
+
+    let (archive, archive_dir) = match &options.action {
+        CleanAction::Archive(dir) => (true, dir.as_deref()),
+        CleanAction::Delete => (false, None),
+    };
+    delete_entries(&to_clean, clean_size, archive, archive_dir);
+    Ok(())
+}
+
+fn print_clean_summary(
+    category_groups: &[(Category, Vec<&ScannedEntry>)],
+    filtered: &[&ScannedEntry],
+    all_entries: &[ScannedEntry],
+    total_size: u64,
+    dry_run: bool,
+    include_unsafe: bool,
+) {
     println!(
-        "Items to {}:",
-        if options.dry_run {
-            "clean (dry run)"
+        "\n{}",
+        if dry_run {
+            "Items to clean (dry run):".bold()
         } else {
-            "clean"
+            "Items to clean:".bold()
         }
     );
 
-    for entry in &filtered {
-        let safety_indicator = match entry.safety {
+    for (i, (cat, cat_entries)) in category_groups.iter().enumerate() {
+        let cat_size: u64 = cat_entries.iter().map(|e| e.size).sum();
+        let safety = cat.default_safety();
+        let safety_indicator = match safety {
             SafetyLevel::Safe => "[Safe]".green(),
             SafetyLevel::Caution => "[Caution]".yellow(),
             SafetyLevel::Danger => "[Danger]".red(),
             SafetyLevel::Error => "[Error]".magenta(),
         };
         println!(
-            "  {} {:>10}  {}",
+            "  {} {} {:>10}  {} ({} items)",
+            format!("[{:>2}]", i + 1).dim(),
             safety_indicator,
-            util::human_size(entry.size),
-            util::tilde_path(&entry.path)
+            util::human_size(cat_size),
+            cat,
+            cat_entries.len()
         );
     }
 
     println!(
-        "\nTotal: {} across {} items",
+        "\nTotal: {} across {} items in {} categories",
         util::human_size(total_size).bold(),
-        filtered.len()
+        filtered.len(),
+        category_groups.len()
     );
 
-    if !options.include_unsafe {
-        let unsafe_count = entries
+    if !include_unsafe {
+        let unsafe_count = all_entries
             .iter()
             .filter(|e| e.safety != SafetyLevel::Safe)
             .count();
         if unsafe_count > 0 {
-            let unsafe_size: u64 = entries
+            let unsafe_size: u64 = all_entries
                 .iter()
                 .filter(|e| e.safety != SafetyLevel::Safe)
                 .map(|e| e.size)
@@ -146,30 +206,38 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
             );
         }
     }
-
-    if options.dry_run {
-        println!(
-            "\n{}",
-            "Dry run - no files were deleted. Use --force to delete.".yellow()
-        );
-        return Ok(());
-    }
-
-    if !options.skip_confirm && !confirm_deletion(&filtered)? {
-        println!("Cancelled.");
-        return Ok(());
-    }
-
-    let (archive, archive_dir) = match &options.action {
-        CleanAction::Archive(dir) => (true, dir.as_deref()),
-        CleanAction::Delete => (false, None),
-    };
-    delete_entries(&filtered, total_size, archive, archive_dir);
-    Ok(())
 }
 
-fn confirm_deletion(entries: &[&ScannedEntry]) -> Result<bool> {
-    let has_danger = entries.iter().any(|e| e.safety == SafetyLevel::Danger);
+/// Group entries by category, preserving order by total size descending.
+fn group_by_category<'a>(entries: &[&'a ScannedEntry]) -> Vec<(Category, Vec<&'a ScannedEntry>)> {
+    use indexmap::IndexMap;
+    let mut groups: IndexMap<Category, Vec<&'a ScannedEntry>> = IndexMap::new();
+    for entry in entries {
+        groups.entry(entry.category).or_default().push(entry);
+    }
+    let mut result: Vec<_> = groups.into_iter().collect();
+    result
+        .sort_by_key(|(_, entries)| std::cmp::Reverse(entries.iter().map(|e| e.size).sum::<u64>()));
+    result
+}
+
+/// Interactive confirmation that lets the user choose what to clean.
+///
+/// Returns the set of categories the user chose to clean, or empty if cancelled.
+///
+/// Accepts:
+///   y / a / all  -- clean everything
+///   n / q        -- cancel
+///   s / safe     -- clean only Safe categories
+///   c / caution  -- clean Safe + Caution categories
+///   1,3,5        -- clean specific categories by number
+///   1-4          -- clean a range of categories
+fn interactive_confirm(
+    category_groups: &[(Category, Vec<&ScannedEntry>)],
+) -> Result<rustc_hash::FxHashSet<Category>> {
+    let has_danger = category_groups
+        .iter()
+        .any(|(cat, _)| cat.default_safety() == SafetyLevel::Danger);
     if has_danger {
         println!(
             "\n{}",
@@ -178,12 +246,77 @@ fn confirm_deletion(entries: &[&ScannedEntry]) -> Result<bool> {
                 .bold()
         );
     }
-    print!("\nProceed with deletion? [y/N] ");
+
+    println!(
+        "\n{}",
+        "Clean: [y]es all, [n]o cancel, [s]afe only, [c]aution+safe, or category numbers (1,3,5 or 1-4)"
+            .dim()
+    );
+    print!("> ");
     io::stdout().flush()?;
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    Ok(input.trim().eq_ignore_ascii_case("y"))
+    let input = input.trim().to_lowercase();
+
+    if input.is_empty() || input == "n" || input == "q" || input == "no" {
+        return Ok(rustc_hash::FxHashSet::default());
+    }
+
+    // "y" / "a" / "all" / "yes" -- clean everything
+    if input == "y" || input == "a" || input == "all" || input == "yes" {
+        return Ok(category_groups.iter().map(|(cat, _)| *cat).collect());
+    }
+
+    // "s" / "safe" -- only Safe categories
+    if input == "s" || input == "safe" {
+        return Ok(category_groups
+            .iter()
+            .filter(|(cat, _)| cat.default_safety() == SafetyLevel::Safe)
+            .map(|(cat, _)| *cat)
+            .collect());
+    }
+
+    // "c" / "caution" -- Safe + Caution
+    if input == "c" || input == "caution" {
+        return Ok(category_groups
+            .iter()
+            .filter(|(cat, _)| {
+                matches!(
+                    cat.default_safety(),
+                    SafetyLevel::Safe | SafetyLevel::Caution
+                )
+            })
+            .map(|(cat, _)| *cat)
+            .collect());
+    }
+
+    // Parse numbers: "1,3,5" or "1-4" or "1,3-5,7"
+    let mut selected = rustc_hash::FxHashSet::default();
+    for part in input.split(',') {
+        let part = part.trim();
+        if let Some((start, end)) = part.split_once('-') {
+            let start: usize = start.trim().parse().unwrap_or(0);
+            let end: usize = end.trim().parse().unwrap_or(0);
+            if start >= 1 && end >= start {
+                for i in start..=end {
+                    if i <= category_groups.len() {
+                        selected.insert(category_groups[i - 1].0);
+                    }
+                }
+            }
+        } else if let Ok(num) = part.parse::<usize>() {
+            if num >= 1 && num <= category_groups.len() {
+                selected.insert(category_groups[num - 1].0);
+            }
+        }
+    }
+
+    if selected.is_empty() {
+        println!("No valid selection. Cancelled.");
+    }
+
+    Ok(selected)
 }
 
 fn delete_entries(
