@@ -28,6 +28,11 @@ pub struct GeneralConfig {
     /// Example: `["cache", "build", "browser", "ide", "app-cache"]`
     #[serde(alias = "defaultCleanCategories")]
     pub default_clean_categories: Vec<String>,
+    /// Categories to remove from the default clean list.
+    /// Easier than rewriting default_clean_categories when you only want to skip a few.
+    /// Example: `["trash", "llm"]` keeps all defaults except trash and LLM models.
+    #[serde(alias = "excludeCleanCategories")]
+    pub exclude_clean_categories: Vec<String>,
     /// Default safety level for `sweeprs clean` when --all is not passed.
     /// "safe" = only Safe items, "caution" = Safe + Caution, "all" = everything.
     #[serde(alias = "defaultCleanSafety")]
@@ -159,6 +164,7 @@ impl Default for GeneralConfig {
                 "llm".to_owned(),
                 "mobile-backup".to_owned(),
             ],
+            exclude_clean_categories: Vec::new(),
             // "caution" = Safe + Caution items. On a dev machine, caution-level
             // items (temp files, old downloads, stale project artifacts, docker
             // images) are all regeneratable.
@@ -346,15 +352,26 @@ impl Config {
     }
 
     /// Get the default clean categories from config, or None if not configured (use all).
+    /// Applies `exclude_clean_categories` as a deny-list on top of the include list.
     pub fn default_clean_categories(&self) -> Option<Vec<crate::scanner::entry::Category>> {
         if self.general.default_clean_categories.is_empty() {
             return None;
         }
+
+        // Parse the exclude list into a set for O(1) lookup
+        let excludes: std::collections::HashSet<_> = self
+            .general
+            .exclude_clean_categories
+            .iter()
+            .filter_map(|s| Self::parse_category(s))
+            .collect();
+
         let cats: Vec<_> = self
             .general
             .default_clean_categories
             .iter()
             .filter_map(|s| Self::parse_category(s))
+            .filter(|cat| !excludes.contains(cat))
             .collect();
         if cats.is_empty() { None } else { Some(cats) }
     }

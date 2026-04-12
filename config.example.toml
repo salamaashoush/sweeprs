@@ -40,6 +40,11 @@ default_clean_categories = [
     "mobile-backup",  # iOS backups, Xcode device support files
 ]
 
+# Instead of rewriting the full list above, you can exclude specific categories:
+# exclude_clean_categories = ["trash", "llm"]
+# This keeps all defaults except trash and LLM models.
+exclude_clean_categories = []
+
 # Safety level for default clean:
 #   "safe"    = only Safe items (caches, build artifacts)
 #   "caution" = Safe + Caution (adds docker, toolchains, logs, downloads, temp files)
