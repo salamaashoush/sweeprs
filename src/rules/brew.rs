@@ -114,8 +114,8 @@ impl CleanupRule for BrewAutoremoveRule {
 
         // Sum up sizes of Cellar directories for each formula.
         let cellar_paths = [
-            "/opt/homebrew/Cellar",            // macOS Apple Silicon
-            "/usr/local/Cellar",               // macOS Intel
+            "/opt/homebrew/Cellar",              // macOS Apple Silicon
+            "/usr/local/Cellar",                 // macOS Intel
             "/home/linuxbrew/.linuxbrew/Cellar", // Linuxbrew
         ];
         let cellar = cellar_paths

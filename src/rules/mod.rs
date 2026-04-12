@@ -21,10 +21,10 @@ pub mod git_data;
 pub mod gitignored;
 pub mod ide;
 pub mod large_files;
-pub mod llm;
-pub mod logs;
 #[cfg(target_os = "linux")]
 pub mod linux;
+pub mod llm;
+pub mod logs;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "macos")]

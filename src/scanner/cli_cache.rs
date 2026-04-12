@@ -90,10 +90,7 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
 
     #[cfg(target_os = "linux")]
     commands.extend_from_slice(&[
-        (
-            "journalctl_disk_usage",
-            &["journalctl", "--disk-usage"],
-        ),
+        ("journalctl_disk_usage", &["journalctl", "--disk-usage"]),
         ("uname_r", &["uname", "-r"]),
     ]);
 

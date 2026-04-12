@@ -69,11 +69,7 @@ impl CleanupRule for JetBrainsCacheRule {
     }
 }
 
-fn scan_jetbrains_dir(
-    dir: &std::path::Path,
-    prefixes: &[&str],
-    entries: &mut Vec<ScannedEntry>,
-) {
+fn scan_jetbrains_dir(dir: &std::path::Path, prefixes: &[&str], entries: &mut Vec<ScannedEntry>) {
     if !dir.exists() {
         return;
     }

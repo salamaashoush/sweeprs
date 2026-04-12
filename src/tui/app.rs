@@ -299,8 +299,7 @@ impl App {
                                 Some(path_str.clone())
                             };
                             if let Some(dir) = dir {
-                                let _ =
-                                    std::process::Command::new("xdg-open").arg(&dir).spawn();
+                                let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
                             }
                         }
                     }
@@ -325,9 +324,7 @@ impl App {
                             });
                     } else {
                         // Try wl-copy (Wayland) first, fall back to xclip (X11)
-                        let wl = std::process::Command::new("wl-copy")
-                            .arg(&path_str)
-                            .spawn();
+                        let wl = std::process::Command::new("wl-copy").arg(&path_str).spawn();
                         if wl.is_err() {
                             let _ = std::process::Command::new("xclip")
                                 .args(["-selection", "clipboard"])

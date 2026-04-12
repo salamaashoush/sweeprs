@@ -579,24 +579,40 @@ fn run_slow_operations(
             brew::clean_brew_entry(&path_str)
         } else if path_str.starts_with("journal:") {
             #[cfg(target_os = "linux")]
-            { crate::rules::linux::clean_journal() }
+            {
+                crate::rules::linux::clean_journal()
+            }
             #[cfg(not(target_os = "linux"))]
-            { Err(std::io::Error::other("not supported")) }
+            {
+                Err(std::io::Error::other("not supported"))
+            }
         } else if path_str.starts_with("pacman:") {
             #[cfg(target_os = "linux")]
-            { crate::rules::linux::clean_pacman() }
+            {
+                crate::rules::linux::clean_pacman()
+            }
             #[cfg(not(target_os = "linux"))]
-            { Err(std::io::Error::other("not supported")) }
+            {
+                Err(std::io::Error::other("not supported"))
+            }
         } else if path_str.starts_with("apt:") {
             #[cfg(target_os = "linux")]
-            { crate::rules::linux::clean_apt() }
+            {
+                crate::rules::linux::clean_apt()
+            }
             #[cfg(not(target_os = "linux"))]
-            { Err(std::io::Error::other("not supported")) }
+            {
+                Err(std::io::Error::other("not supported"))
+            }
         } else if path_str.starts_with("dnf:") {
             #[cfg(target_os = "linux")]
-            { crate::rules::linux::clean_dnf() }
+            {
+                crate::rules::linux::clean_dnf()
+            }
             #[cfg(not(target_os = "linux"))]
-            { Err(std::io::Error::other("not supported")) }
+            {
+                Err(std::io::Error::other("not supported"))
+            }
         } else {
             git_data::clean_git_gc(&path_str)
         };

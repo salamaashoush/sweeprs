@@ -338,10 +338,7 @@ impl CleanupRule for SnapCacheRule {
                     let current_rev = current_link
                         .read_link()
                         .ok()
-                        .and_then(|t| {
-                            t.file_name()
-                                .map(|f| f.to_string_lossy().to_string())
-                        });
+                        .and_then(|t| t.file_name().map(|f| f.to_string_lossy().to_string()));
 
                     if let Ok(revisions) = std::fs::read_dir(&snap_path) {
                         for rev_entry in revisions.flatten() {

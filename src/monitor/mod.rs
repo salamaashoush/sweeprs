@@ -276,9 +276,7 @@ WantedBy=default.target
         println!("  journalctl --user -u {SYSTEMD_UNIT}");
     } else {
         println!("Unit file written to: {}", unit_path.display());
-        println!(
-            "Warning: `systemctl --user enable --now` failed. Try enabling manually."
-        );
+        println!("Warning: `systemctl --user enable --now` failed. Try enabling manually.");
     }
 
     Ok(())

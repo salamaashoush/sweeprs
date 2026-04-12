@@ -37,14 +37,14 @@ pub fn send_notification(title: &str, message: &str) {
                 "/org/freedesktop/Notifications",
                 "--method",
                 "org.freedesktop.Notifications.Notify",
-                "sweeprs",            // app_name
-                "0",                  // replaces_id
-                "",                   // app_icon
-                title,                // summary
-                message,              // body
-                "[]",                 // actions
-                "{}",                 // hints
-                "5000",               // expire_timeout ms
+                "sweeprs", // app_name
+                "0",       // replaces_id
+                "",        // app_icon
+                title,     // summary
+                message,   // body
+                "[]",      // actions
+                "{}",      // hints
+                "5000",    // expire_timeout ms
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
