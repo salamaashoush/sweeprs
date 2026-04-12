@@ -303,15 +303,20 @@ impl ColimaRule {
     }
 }
 
-/// Get size of a single file via metadata (no recursive walk).
+/// Get actual disk usage of a single file (handles sparse files correctly).
+/// Uses block count * 512 to report real SSD usage, not logical file size.
+/// This matters for VM disk images which are commonly sparse (e.g. a 60 GiB
+/// datadisk may only use 18 GiB on disk).
 fn file_size(path: &Path) -> u64 {
-    path.metadata().map(|m| m.len()).unwrap_or(0)
+    use std::os::unix::fs::MetadataExt;
+    path.metadata().map(|m| m.blocks() * 512).unwrap_or(0)
 }
 
-/// Sum sizes of direct children in a directory, excluding named files.
+/// Sum actual disk usage of direct children in a directory, excluding named files.
 /// Only stats immediate entries -- never recurses. Fast for dirs with
-/// large files like disk images.
+/// large files like disk images. Uses block-based sizing for sparse files.
 fn shallow_dir_size(dir: &Path, exclude: &[&str]) -> u64 {
+    use std::os::unix::fs::MetadataExt;
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -324,18 +329,18 @@ fn shallow_dir_size(dir: &Path, exclude: &[&str]) -> u64 {
         }
         if let Ok(meta) = entry.metadata() {
             if meta.is_file() {
-                total += meta.len();
+                total += meta.blocks() * 512;
             }
-            // Skip subdirs to keep it fast -- we only care about
-            // the obvious big files (basedisk, cidata, etc.)
         }
     }
     total
 }
 
-/// Sum sizes of disk image files in a Colima _disks/<instance>/ directory.
+/// Sum actual disk usage of disk image files in a Colima _disks/<instance>/ directory.
 /// Handles both old format (diffdisk/basedisk) and new format (datadisk).
+/// Uses block-based sizing for sparse files.
 fn disk_dir_size(dir: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -343,7 +348,7 @@ fn disk_dir_size(dir: &Path) -> u64 {
     for entry in read_dir.flatten() {
         if let Ok(meta) = entry.metadata() {
             if meta.is_file() {
-                total += meta.len();
+                total += meta.blocks() * 512;
             }
         }
     }

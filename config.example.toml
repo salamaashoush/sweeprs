@@ -1,0 +1,73 @@
+[general]
+confirm_before_delete = true
+cli_dry_run_default = true
+output_format = "table"
+
+# Default categories for `sweeprs clean --force` with no category specified.
+# Includes all high-value categories -- deps alone was 51 GB of unclaimed safe space.
+default_clean_categories = [
+    "cache",          # package manager caches (npm, pip, cargo, etc.)
+    "build",          # build artifacts (target/, .next/, dist/)
+    "deps",           # node_modules, .venv, vendor -- ALL safe, biggest win
+    "browser",        # browser caches
+    "ide",            # IDE/editor caches
+    "app-cache",      # application caches (Slack, Discord, etc.)
+    "logs",           # log files (user + system)
+    "system-junk",    # temp files, QuickLook, mail cache, saved app state
+    "macos",          # macOS caches (wallpapers, Maps, Siri, simulators, etc.)
+    "stale-project",  # build/deps in repos with no commits for 60+ days
+    "docker",         # images, build cache, containers -- all rebuildable on a dev machine
+    "toolchain",      # old Rust/Python/Node toolchain versions
+]
+
+# "caution" cleans Safe + Caution items (temp files, logs, old downloads, stale projects).
+# These are all regeneratable/re-downloadable -- no data loss risk.
+default_clean_safety = "caution"
+
+# Paths to never touch (glob patterns)
+global_excludes = []
+
+[scan]
+max_depth = 10
+threads = 0
+follow_symlinks = false
+
+[categories]
+# 30 days -- anything older than a month in Downloads is probably forgotten
+download_age_days = 30
+# 250 MB -- catch more large files (was 500 MB)
+large_file_threshold = 262144000
+large_file_dirs = ["~/Downloads", "~/Desktop"]
+enable_duplicates = false
+duplicate_min_size = 1048576
+duplicate_dirs = []
+# 60 days -- projects idle for 2 months can have their build artifacts cleaned
+stale_project_days = 60
+
+[categories.enabled]
+package_cache = true
+build_artifact = true
+installed_deps = true
+browser_cache = true
+ide_cache = true
+rust_toolchain = true
+docker = true
+log_file = true
+trash = true
+old_download = true
+large_file = true
+duplicate = false
+macos_specific = true
+app_cache = true
+system_junk = true
+mobile_backup = true
+llm_models = true
+stale_project = true
+
+[monitor]
+poll_interval_secs = 3600
+warning_threshold_percent = 80
+critical_threshold_percent = 90
+# Auto-clean safe caches when disk exceeds 80% usage
+auto_clean = true
+auto_clean_categories = ["cache", "build", "browser", "ide", "app-cache", "system-junk", "logs", "docker", "toolchain"]

@@ -26,6 +26,27 @@ const KNOWN_CACHE_DIRS: &[&str] = &[
     "nix",
     "containers",
     "huggingface",
+    // macOS_extra rules
+    "com.unity3d.UnityEditor",
+    "com.valvesoftware.steam",
+    "com.epicgames.EpicGamesLauncher",
+    "GeoServices",
+    "com.apple.Maps",
+    "com.apple.SpeechRecognitionCore",
+    "VoiceServices",
+    "com.apple.parsec",
+    "com.apple.parsecd",
+    "com.apple.bird",
+    "CloudKit",
+    "com.apple.quicklookd",
+    "com.apple.nsurlsessiond",
+    "com.apple.appstore",
+    "com.apple.appstoreagent",
+    "com.apple.FinalCut",
+    "com.apple.garageband10",
+    "com.apple.logic10",
+    "com.apple.iMovieApp",
+    "com.apple.wallpaper",
 ];
 
 const KNOWN_APP_SUPPORT_DIRS: &[&str] = &[
@@ -41,6 +62,12 @@ const KNOWN_APP_SUPPORT_DIRS: &[&str] = &[
     "Jan",
     "MobileSync",
     "com.docker.docker",
+    // macos_extra rules
+    "GarageBand",
+    "Logic",
+    "Final Cut Pro",
+    "Steam",
+    "com.apple.wallpaper",
 ];
 
 const MIN_CACHE_SIZE: u64 = 50_000_000; // 50 MiB

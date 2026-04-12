@@ -23,6 +23,7 @@ pub mod large_files;
 pub mod llm;
 pub mod logs;
 pub mod macos;
+pub mod macos_extra;
 pub mod orphan_detection;
 pub mod stale_project;
 pub mod mobile;
@@ -98,6 +99,7 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(large_files::rules());
     rules.extend(duplicates::rules());
     rules.extend(macos::rules());
+    rules.extend(macos_extra::rules());
     rules.extend(app_cache::rules());
     rules.extend(system::rules());
     rules.extend(mobile::rules());
