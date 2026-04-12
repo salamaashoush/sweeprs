@@ -1,49 +1,98 @@
+# sweeprs configuration
+# Location: ~/Library/Application Support/sweeprs/config.toml (macOS)
+#           ~/.config/sweeprs/config.toml (Linux)
+#
+# Generate default config: sweeprs config --init
+# Show config path:        sweeprs config --path
+#
+# All values below show the built-in defaults. Uncomment and modify to override.
+# Missing keys use the built-in default -- you only need to set what you change.
+
 [general]
+# Confirm before deleting in TUI mode
 confirm_before_delete = true
+
+# CLI clean is dry-run by default. Pass --force to actually delete.
 cli_dry_run_default = true
+
+# Output format: "table" (human-readable) or "json"
 output_format = "table"
 
-# Default categories for `sweeprs clean --force` with no category specified.
-# Includes all high-value categories -- deps alone was 51 GB of unclaimed safe space.
+# Categories to clean when running `sweeprs clean --force` with no arguments.
+# All 16 cleanable categories are included by default. Remove any you want to skip.
+# Use `sweeprs categories` to list all available categories and their CLI names.
 default_clean_categories = [
-    "cache",          # package manager caches (npm, pip, cargo, etc.)
-    "build",          # build artifacts (target/, .next/, dist/)
-    "deps",           # node_modules, .venv, vendor -- ALL safe, biggest win
-    "browser",        # browser caches
-    "ide",            # IDE/editor caches
-    "app-cache",      # application caches (Slack, Discord, etc.)
-    "logs",           # log files (user + system)
-    "system-junk",    # temp files, QuickLook, mail cache, saved app state
-    "macos",          # macOS caches (wallpapers, Maps, Siri, simulators, etc.)
-    "stale-project",  # build/deps in repos with no commits for 60+ days
-    "docker",         # images, build cache, containers -- all rebuildable on a dev machine
-    "toolchain",      # old Rust/Python/Node toolchain versions
+    "cache",          # package manager caches (npm, pip, cargo, brew, go, maven, etc.)
+    "build",          # build artifacts (target/, dist/, DerivedData, git gc, .nyc_output)
+    "deps",           # installed dependencies (node_modules, .venv, vendor)
+    "browser",        # browser caches (Chrome, Safari, Firefox, Arc, Brave, Edge)
+    "ide",            # IDE caches (VS Code, Xcode, JetBrains, Cursor, Zed)
+    "app-cache",      # app caches (Slack, Discord, Steam, Unity, Chrome code cache)
+    "logs",           # log files (~/Library/Logs, /var/log, /Library/Logs)
+    "system-junk",    # temp files, QuickLook, mail cache, saved app state, font cache
+    "macos",          # macOS caches (wallpapers, Maps, Siri, orphaned containers)
+    "stale-project",  # build/deps dirs in git repos with no commits for 60+ days
+    "docker",         # Docker images, build cache, Colima VMs and disks
+    "toolchain",      # old Rust/Python/Node/Ruby/Java toolchain versions
+    "downloads",      # files in ~/Downloads older than download_age_days
+    "trash",          # ~/.Trash contents
+    "llm",            # LLM models (Ollama, HuggingFace, LM Studio, GPT4All)
+    "mobile-backup",  # iOS backups, Xcode device support files
 ]
 
-# "caution" cleans Safe + Caution items (temp files, logs, old downloads, stale projects).
-# These are all regeneratable/re-downloadable -- no data loss risk.
+# Safety level for default clean:
+#   "safe"    = only Safe items (caches, build artifacts)
+#   "caution" = Safe + Caution (adds docker, toolchains, logs, downloads, temp files)
+#   "all"     = everything including Danger (trash, large files, duplicates)
 default_clean_safety = "caution"
 
-# Paths to never touch (glob patterns)
+# Glob patterns for paths to never touch. Applied to all scans and cleans.
+# Example: ["**/my-important-project/**", "**/dont-touch/**"]
 global_excludes = []
 
+# Default directory for `--archive` mode. When set, compressed archives (.tar.zst)
+# are stored here instead of next to the original directory.
+# archive_dir = "~/Archives/sweeprs"
+
 [scan]
+# Maximum directory depth for project scanning (build artifacts, deps, gitignored)
 max_depth = 10
+
+# Number of threads for parallel scanning. 0 = auto-detect (recommended).
 threads = 0
+
+# Follow symbolic links during scanning
 follow_symlinks = false
 
+# Project search roots (relative to ~ or absolute paths).
+# These are scanned for build artifacts, installed dependencies, and stale projects.
+# Default: Workspace, Projects, Developer, Code, src, dev
+# project_roots = ["Workspace", "Projects"]
+
 [categories]
-# 30 days -- anything older than a month in Downloads is probably forgotten
+# Files in ~/Downloads older than this many days are flagged for cleanup
 download_age_days = 30
-# 250 MB -- catch more large files (was 500 MB)
+
+# Minimum file size (bytes) for the "large files" category. Default: 250 MB.
 large_file_threshold = 262144000
+
+# Directories to scan for large files
 large_file_dirs = ["~/Downloads", "~/Desktop"]
+
+# Enable duplicate file detection (opt-in, CPU-intensive, uses XXH3 hashing)
 enable_duplicates = false
+
+# Minimum file size for duplicate detection (bytes). Default: 1 MB.
 duplicate_min_size = 1048576
+
+# Directories to scan for duplicates (empty = disabled even if enable_duplicates=true)
+# duplicate_dirs = ["~/Documents", "~/Downloads"]
 duplicate_dirs = []
-# 60 days -- projects idle for 2 months can have their build artifacts cleaned
+
+# Git repos with no commits for this many days have their build/deps flagged as stale
 stale_project_days = 60
 
+# Enable/disable individual categories. All enabled by default except duplicates.
 [categories.enabled]
 package_cache = true
 build_artifact = true
@@ -65,9 +114,20 @@ llm_models = true
 stale_project = true
 
 [monitor]
+# How often the background monitor checks disk usage (seconds)
 poll_interval_secs = 3600
+
+# Disk usage thresholds for notifications
 warning_threshold_percent = 80
 critical_threshold_percent = 90
-# Auto-clean safe caches when disk exceeds 80% usage
+
+# Automatically clean safe items when disk exceeds warning threshold.
+# Only cleans Safe-level items from the categories listed below.
 auto_clean = true
-auto_clean_categories = ["cache", "build", "browser", "ide", "app-cache", "system-junk", "logs", "docker", "toolchain"]
+
+# Categories to auto-clean when disk is full
+auto_clean_categories = [
+    "cache", "build", "browser", "ide", "app-cache",
+    "system-junk", "logs", "docker", "toolchain",
+    "stale-project", "downloads",
+]

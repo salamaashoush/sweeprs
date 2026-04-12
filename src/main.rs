@@ -367,12 +367,23 @@ fn main() -> Result<()> {
                 )
             };
 
+            // CLI --archive-dir overrides config archive_dir
+            let resolved_archive_dir = archive_dir
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    config
+                        .general
+                        .archive_dir
+                        .as_ref()
+                        .map(|s| config::Config::expand_path(s))
+                });
+
             let options = cleaner::CleanOptions {
                 dry_run: !force,
                 skip_confirm: yes,
                 include_unsafe,
                 archive,
-                archive_dir: archive_dir.map(std::path::PathBuf::from),
+                archive_dir: resolved_archive_dir,
             };
             cleaner::clean(&result.entries, &options)?;
         }

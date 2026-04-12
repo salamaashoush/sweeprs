@@ -32,6 +32,10 @@ pub struct GeneralConfig {
     /// "safe" = only Safe items, "caution" = Safe + Caution, "all" = everything.
     #[serde(alias = "defaultCleanSafety")]
     pub default_clean_safety: String,
+    /// Default directory for `--archive` mode. If empty, archives are placed
+    /// next to the original directory.
+    #[serde(alias = "archiveDir")]
+    pub archive_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,8 +138,32 @@ impl Default for GeneralConfig {
             cli_dry_run_default: true,
             output_format: "table".to_owned(),
             global_excludes: Vec::new(),
-            default_clean_categories: Vec::new(),
-            default_clean_safety: "safe".to_owned(),
+            // Default categories cover all safe-to-clean items on a dev machine.
+            // Empty list means "all enabled categories" for backwards compat,
+            // but we ship explicit defaults so users know what will be cleaned.
+            default_clean_categories: vec![
+                "cache".to_owned(),
+                "build".to_owned(),
+                "deps".to_owned(),
+                "browser".to_owned(),
+                "ide".to_owned(),
+                "app-cache".to_owned(),
+                "logs".to_owned(),
+                "system-junk".to_owned(),
+                "macos".to_owned(),
+                "stale-project".to_owned(),
+                "docker".to_owned(),
+                "toolchain".to_owned(),
+                "downloads".to_owned(),
+                "trash".to_owned(),
+                "llm".to_owned(),
+                "mobile-backup".to_owned(),
+            ],
+            // "caution" = Safe + Caution items. On a dev machine, caution-level
+            // items (temp files, old downloads, stale project artifacts, docker
+            // images) are all regeneratable.
+            default_clean_safety: "caution".to_owned(),
+            archive_dir: None,
         }
     }
 }
@@ -154,14 +182,14 @@ impl Default for ScanConfig {
 impl Default for CategoriesConfig {
     fn default() -> Self {
         Self {
-            download_age_days: 90,
-            large_file_threshold: 524_288_000,
+            download_age_days: 30,
+            large_file_threshold: 262_144_000, // 250 MB
             large_file_dirs: vec!["~/Downloads".to_owned(), "~/Desktop".to_owned()],
             enable_duplicates: false,
             duplicate_min_size: 1_048_576,
             duplicate_dirs: Vec::new(),
             enabled: EnabledCategories::default(),
-            stale_project_days: 90,
+            stale_project_days: 60,
         }
     }
 }
@@ -195,10 +223,20 @@ impl Default for MonitorConfig {
     fn default() -> Self {
         Self {
             poll_interval_secs: 3600,
-            warning_threshold_percent: 85,
-            critical_threshold_percent: 95,
-            auto_clean: false,
-            auto_clean_categories: Vec::new(),
+            warning_threshold_percent: 80,
+            critical_threshold_percent: 90,
+            auto_clean: true,
+            auto_clean_categories: vec![
+                "cache".to_owned(),
+                "build".to_owned(),
+                "browser".to_owned(),
+                "ide".to_owned(),
+                "app-cache".to_owned(),
+                "system-junk".to_owned(),
+                "logs".to_owned(),
+                "docker".to_owned(),
+                "toolchain".to_owned(),
+            ],
         }
     }
 }
