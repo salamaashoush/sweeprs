@@ -9,6 +9,7 @@ use crate::tui::app::App;
 use crate::tui::theme;
 use crate::tui::tree::RowRef;
 use crate::util;
+use crate::virtual_entry;
 
 pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
@@ -99,7 +100,7 @@ fn render_entry_detail(
     let mut lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            util::tilde_path(&entry.path),
+            virtual_entry::display(&entry.path),
             Style::default().fg(theme::ACCENT).bold(),
         )),
         Line::from(""),

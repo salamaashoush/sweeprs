@@ -1,3 +1,4 @@
+pub mod ai_tools;
 pub mod android;
 pub mod app_cache;
 pub mod brew;
@@ -32,6 +33,7 @@ pub mod macos_extra;
 pub mod mobile;
 pub mod orphan_detection;
 pub mod pycache;
+pub mod simulator;
 pub mod stale_project;
 pub mod system;
 pub mod test_artifacts;
@@ -126,6 +128,8 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(core_dumps::rules());
     rules.extend(electron_data::rules());
     rules.extend(virtualization::rules());
+    rules.extend(simulator::rules());
+    rules.extend(ai_tools::rules());
     rules.extend(generic_caches::rules());
     rules.extend(orphan_detection::rules());
     #[cfg(target_os = "macos")]
@@ -147,6 +151,7 @@ const CLI_CACHE_CATEGORIES: &[Category] = &[
     Category::Docker,
     Category::Toolchain,
     Category::PackageCache,
+    Category::Simulator,
 ];
 
 /// Eagerly initialize `LazyLock` caches on dedicated OS threads,

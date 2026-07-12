@@ -64,41 +64,6 @@ impl CleanupRule for TimeMachineSnapshotsRule {
     }
 }
 
-pub struct XcodeSimulatorsRule;
-
-impl CleanupRule for XcodeSimulatorsRule {
-    fn name(&self) -> &'static str {
-        "Xcode Simulators"
-    }
-
-    fn category(&self) -> Category {
-        Category::MacosSpecific
-    }
-
-    fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let home = dirs::home_dir().unwrap_or_default();
-        let sims_dir = home.join("Library/Developer/CoreSimulator/Devices");
-
-        if !sims_dir.exists() {
-            return Vec::new();
-        }
-
-        let (size, device_count) = walker::dir_size_and_count(&sims_dir);
-        if size == 0 {
-            return Vec::new();
-        }
-
-        vec![ScannedEntry {
-            path: sims_dir,
-            size,
-            category: Category::MacosSpecific,
-            safety: SafetyLevel::Caution,
-            description: format!("Xcode Simulators ({device_count} devices)"),
-            item_count: Some(device_count),
-        }]
-    }
-}
-
 pub struct XcodeArchivesRule;
 
 impl CleanupRule for XcodeArchivesRule {
@@ -169,7 +134,6 @@ cache_rule!(
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(TimeMachineSnapshotsRule),
-        Box::new(XcodeSimulatorsRule),
         Box::new(XcodeArchivesRule),
         Box::new(AppleMusicCacheRule),
         Box::new(PhotosFaceCacheRule),

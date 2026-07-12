@@ -38,6 +38,8 @@ default_clean_categories = [
     "llm",            # LLM models (Ollama, HuggingFace, LM Studio, GPT4All)
     "mobile-backup",  # iOS backups, Xcode device support files
     # "downloads",    # opt-in: old files in ~/Downloads -- uncomment to include
+    # "simulator",    # opt-in: deleting a runtime costs a multi-GB re-download
+    # "ai",           # opt-in: the Claude Desktop VM is re-downloaded on next use
 ]
 
 # Instead of rewriting the full list above, you can exclude specific categories:
@@ -116,6 +118,8 @@ app_cache = true
 system_junk = true
 mobile_backup = true
 llm_models = true
+simulator = true
+ai_tools = true
 stale_project = true
 
 [monitor]

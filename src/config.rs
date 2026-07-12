@@ -116,6 +116,9 @@ pub struct EnabledCategories {
     pub mobile_backup: bool,
     #[serde(alias = "llmModels")]
     pub llm_models: bool,
+    pub simulator: bool,
+    #[serde(alias = "aiTools")]
+    pub ai_tools: bool,
     #[serde(alias = "staleProject")]
     pub stale_project: bool,
 }
@@ -230,6 +233,8 @@ impl Default for EnabledCategories {
             system_junk: true,
             mobile_backup: true,
             llm_models: true,
+            simulator: true,
+            ai_tools: true,
             stale_project: true,
         }
     }
@@ -332,6 +337,8 @@ impl Config {
             Category::SystemJunk => self.categories.enabled.system_junk,
             Category::MobileBackup => self.categories.enabled.mobile_backup,
             Category::LlmModels => self.categories.enabled.llm_models,
+            Category::Simulator => self.categories.enabled.simulator,
+            Category::AiTools => self.categories.enabled.ai_tools,
             Category::StaleProject => self.categories.enabled.stale_project,
         }
     }
@@ -358,6 +365,8 @@ impl Config {
             "system-junk" => Some(Category::SystemJunk),
             "mobile-backup" => Some(Category::MobileBackup),
             "llm" | "llm-models" => Some(Category::LlmModels),
+            "simulator" | "simulators" => Some(Category::Simulator),
+            "ai" | "ai-tools" => Some(Category::AiTools),
             "stale-project" | "stale-projects" => Some(Category::StaleProject),
             _ => None,
         }

@@ -11,7 +11,7 @@
 
 Fast disk cleanup TUI and CLI written in Rust. Supports macOS and Linux.
 
-Scans your system for reclaimable disk space across 17 categories and 23+ rule modules,
+Scans your system for reclaimable disk space across 21 categories and 38 rule modules,
 presents results in an interactive terminal UI or structured CLI output, and cleans up
 safely with dry-run by default.
 
@@ -20,7 +20,7 @@ safely with dry-run by default.
 ## Features
 
 - **Interactive TUI** -- tree-based browser with real-time scan progress, search/filter, and clipboard support
-- **17 scan categories** -- caches, build artifacts, dependencies, Docker, Homebrew, LLM models, cloud CLIs, and more
+- **21 scan categories** -- caches, build artifacts, dependencies, Docker, Homebrew, simulators, AI tools, LLM models, cloud CLIs, and more
 - **Safety levels** -- entries classified as Safe, Caution, or Danger with safe-only cleanup by default
 - **Multi-category clean** -- clean multiple categories in one command: `sweeprs clean cache build deps --force`
 - **Default clean categories** -- configure which categories to clean by default so `sweeprs clean --force` does the right thing
@@ -291,11 +291,13 @@ sweeprs config --path
 | Docker | `docker` | Caution | Images, containers, volumes, build cache |
 | Log Files | `logs` | Caution | System logs in /var/log, diagnostic reports, ~/Library/Logs (macOS) |
 | Old Downloads | `downloads` | Caution | Downloads older than configurable age (default 90 days) |
-| macOS Specific | `macos` | Caution | Xcode simulators, QuickLook, Mail caches, Time Machine snapshots |
+| macOS Specific | `macos` | Caution | QuickLook, Mail caches, Time Machine snapshots, Xcode archives |
 | Linux Specific | `linux` | Caution | systemd journal, pacman/apt/dnf caches, snap, flatpak, old kernels, Steam/Proton, AUR caches |
 | System Junk | `system-junk` | Caution | Temp files (/tmp, $TMPDIR), core dumps, font caches |
-| Mobile Backups | `mobile-backup` | Caution | iOS device backups, Android SDK/emulator caches |
+| Mobile Backups | `mobile-backup` | Caution | iOS device backups, Xcode device support files |
 | LLM Models | `llm` | Caution | Ollama, HuggingFace, LM Studio, GPT4All, Jan AI, llama.cpp |
+| Simulators | `simulator` | Caution | iOS simulator runtimes and devices, Android AVDs and system images |
+| AI Tools | `ai` | Caution | Superseded Claude Code versions, Claude Desktop VM, Claude/Cursor/Codex/Copilot caches and downloaded extensions |
 | Trash | `trash` | Danger | Trash contents (~/.Trash on macOS, ~/.local/share/Trash on Linux) |
 | Large Files | `large-files` | Danger | Files over 500 MB (configurable) |
 | Duplicates | `duplicates` | Danger | Identical files by content hash (disabled by default) |
@@ -418,6 +420,8 @@ app_cache = true
 system_junk = true
 mobile_backup = true
 llm_models = true
+simulator = true
+ai_tools = true
 
 [monitor]
 poll_interval_secs = 3600       # Check interval (1 hour)
@@ -463,6 +467,8 @@ Use these names with `sweeprs scan --category` or `sweeprs clean`:
 | `system-junk` | System Junk |
 | `mobile-backup` | Mobile Backups |
 | `llm` | LLM Models |
+| `simulator` | Simulators |
+| `ai` | AI Tools |
 
 ## Architecture
 
@@ -504,8 +510,10 @@ src/
     mobile.rs        Mobile device backups
     trash.rs         Trash contents
     llm.rs           LLM model storage (Ollama, HuggingFace, LM Studio, GPT4All, Jan AI)
+    ai_tools.rs      Claude Code versions, Claude Desktop VM, agent CLI caches and extensions
+    simulator.rs     iOS simulator runtimes/devices (simctl), Android AVDs and system images
     conda.rs         Conda/Mamba environments and caches
-    android.rs       Android SDK, Gradle, emulator caches
+    android.rs       Android SDK and Gradle caches
     pycache.rs       Python __pycache__ directories
     containers.rs    Podman, Lima, Colima
     cloud_cache.rs   Cloud CLI caches (gcloud, AWS, Terraform, Azure)

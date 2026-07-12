@@ -3,6 +3,7 @@ use yansi::Paint;
 
 use crate::scanner::entry::{Category, DiskInfo, SafetyLevel, ScanResult, ScannedEntry};
 use crate::util;
+use crate::virtual_entry;
 
 pub fn print_table(result: &ScanResult) {
     print_header(result);
@@ -86,7 +87,7 @@ fn print_entry(entry: &ScannedEntry) {
         safety_indicator,
         util::human_size(entry.size),
         entry.description,
-        util::tilde_path(&entry.path).dim()
+        virtual_entry::display(&entry.path).dim()
     );
 }
 

@@ -9,6 +9,7 @@ mod rules;
 mod scanner;
 mod tui;
 mod util;
+mod virtual_entry;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -149,6 +150,8 @@ enum CategoryArg {
     SystemJunk,
     MobileBackup,
     Llm,
+    Simulator,
+    Ai,
     StaleProject,
 }
 
@@ -173,6 +176,8 @@ impl CategoryArg {
             Self::SystemJunk => Category::SystemJunk,
             Self::MobileBackup => Category::MobileBackup,
             Self::Llm => Category::LlmModels,
+            Self::Simulator => Category::Simulator,
+            Self::Ai => Category::AiTools,
             Self::StaleProject => Category::StaleProject,
         }
     }
@@ -199,6 +204,8 @@ enum CleanTarget {
     SystemJunk,
     MobileBackup,
     Llm,
+    Simulator,
+    Ai,
     StaleProject,
 }
 
@@ -224,6 +231,8 @@ impl CleanTarget {
             Self::SystemJunk => Some(Category::SystemJunk),
             Self::MobileBackup => Some(Category::MobileBackup),
             Self::Llm => Some(Category::LlmModels),
+            Self::Simulator => Some(Category::Simulator),
+            Self::Ai => Some(Category::AiTools),
             Self::StaleProject => Some(Category::StaleProject),
         }
     }
@@ -455,6 +464,8 @@ fn main() -> Result<()> {
                     Category::SystemJunk => "system-junk",
                     Category::MobileBackup => "mobile-backup",
                     Category::LlmModels => "llm",
+                    Category::Simulator => "simulator",
+                    Category::AiTools => "ai",
                     Category::StaleProject => "stale-project",
                 };
                 println!("{:<20} {:<10} {}", cat, cat.default_safety(), arg);

@@ -8,9 +8,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use yansi::Paint;
 
-use crate::rules::{brew, docker, git_data};
+use crate::rules::simulator;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::util;
+use crate::virtual_entry;
 
 /// Remove a directory tree, handling common edge cases:
 /// - Read-only files/dirs (Go modules, `node_modules/.cache`): chmod before retry
@@ -261,7 +262,7 @@ fn print_clean_summary(
                 "  {} {:>10}  {}",
                 safety_indicator,
                 util::human_size(entry.size),
-                util::tilde_path(&entry.path)
+                virtual_entry::display(&entry.path)
             );
         }
     }
@@ -416,16 +417,15 @@ fn delete_entries(
     let mut skipped_entries: Vec<(&ScannedEntry, &str)> = Vec::new();
 
     for entry in entries {
-        let path_str = entry.path.display().to_string();
-        if path_str.starts_with("git-gc:")
-            || path_str.starts_with("docker:")
-            || path_str.starts_with("brew:")
-            || path_str.starts_with("journal:")
-            || path_str.starts_with("pacman:")
-            || path_str.starts_with("apt:")
-            || path_str.starts_with("dnf:")
-        {
-            slow_entries.push(entry);
+        if virtual_entry::is_virtual(&entry.path) {
+            // These stand for a command, not a directory: there is nothing to
+            // put in a tarball. Running them anyway would delete the very data
+            // the user asked to keep a copy of.
+            if archive {
+                skipped_entries.push((entry, "cannot be archived"));
+            } else {
+                slow_entries.push(entry);
+            }
         } else if needs_root(&entry.path) {
             skipped_entries.push((entry, "requires sudo"));
         } else {
@@ -440,7 +440,7 @@ fn delete_entries(
             println!(
                 "  {} {} ({})",
                 "Skipped".yellow(),
-                util::tilde_path(&entry.path),
+                virtual_entry::display(&entry.path),
                 reason
             );
         }
@@ -476,10 +476,8 @@ fn delete_entries(
 
             let result = if archive && entry.path.is_dir() {
                 archive_directory(&entry.path, archive_dir)
-            } else if entry.path.is_dir() {
-                remove_dir_robust(&entry.path)
-            } else if entry.path.is_file() {
-                std::fs::remove_file(&entry.path)
+            } else if entry.path.is_dir() || entry.path.is_file() {
+                delete_path(&entry.path)
             } else {
                 bar.inc(1);
                 return;
@@ -517,7 +515,7 @@ fn delete_entries(
     if !skipped_entries.is_empty() {
         let skipped_size: u64 = skipped_entries.iter().map(|(e, _)| e.size).sum();
         println!(
-            "Skipped: {} ({} items need sudo)",
+            "Skipped: {} ({} items)",
             util::human_size(skipped_size).yellow(),
             skipped_entries.len()
         );
@@ -526,8 +524,29 @@ fn delete_entries(
     if !errors.is_empty() {
         println!("\nErrors:");
         for (path, err) in &errors {
-            println!("  {} {}: {err}", "Failed".red(), util::tilde_path(path));
+            println!(
+                "  {} {}: {err}",
+                "Failed".red(),
+                virtual_entry::display(path)
+            );
         }
+    }
+}
+
+/// Delete a real filesystem entry, together with whatever registers it.
+///
+/// An Android AVD is a `.avd` payload plus a sibling `.ini` the emulator
+/// enumerates it from; removing only the payload leaves a device that lists but
+/// cannot launch.
+pub fn delete_path(path: &Path) -> io::Result<()> {
+    if path.is_dir() {
+        remove_dir_robust(path)?;
+        if simulator::is_avd_payload(path) {
+            simulator::remove_avd_ini(path);
+        }
+        Ok(())
+    } else {
+        std::fs::remove_file(path)
     }
 }
 
@@ -543,26 +562,7 @@ fn run_slow_operations(
     println!();
     for entry in entries {
         let path_str = entry.path.display().to_string();
-        let display = if path_str.starts_with("git-gc:") {
-            let repo = path_str.strip_prefix("git-gc:").unwrap_or(&path_str);
-            format!(
-                "git gc --aggressive {}",
-                util::tilde_path(&PathBuf::from(repo))
-            )
-        } else if path_str.starts_with("docker:") {
-            let kind = path_str.strip_prefix("docker:").unwrap_or(&path_str);
-            format!("docker prune {kind}")
-        } else if path_str.starts_with("journal:") {
-            "journalctl --vacuum-size=100M".to_owned()
-        } else if path_str.starts_with("pacman:") {
-            "paccache -r -k 2".to_owned()
-        } else if path_str.starts_with("apt:") {
-            "apt clean".to_owned()
-        } else if path_str.starts_with("dnf:") {
-            "dnf clean all".to_owned()
-        } else {
-            format!("brew cleanup {path_str}")
-        };
+        let display = virtual_entry::label(&path_str);
 
         let spinner = ProgressBar::new_spinner();
         spinner.set_style(
@@ -573,49 +573,7 @@ fn run_slow_operations(
         spinner.set_message(display.clone());
         spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-        let result = if path_str.starts_with("docker:") {
-            docker::clean_docker_entry(&path_str)
-        } else if path_str.starts_with("brew:") {
-            brew::clean_brew_entry(&path_str)
-        } else if path_str.starts_with("journal:") {
-            #[cfg(target_os = "linux")]
-            {
-                crate::rules::linux::clean_journal()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(std::io::Error::other("not supported"))
-            }
-        } else if path_str.starts_with("pacman:") {
-            #[cfg(target_os = "linux")]
-            {
-                crate::rules::linux::clean_pacman()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(std::io::Error::other("not supported"))
-            }
-        } else if path_str.starts_with("apt:") {
-            #[cfg(target_os = "linux")]
-            {
-                crate::rules::linux::clean_apt()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(std::io::Error::other("not supported"))
-            }
-        } else if path_str.starts_with("dnf:") {
-            #[cfg(target_os = "linux")]
-            {
-                crate::rules::linux::clean_dnf()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(std::io::Error::other("not supported"))
-            }
-        } else {
-            git_data::clean_git_gc(&path_str)
-        };
+        let result = virtual_entry::clean(&path_str);
 
         spinner.finish_and_clear();
 
@@ -734,4 +692,44 @@ fn archive_directory(dir: &Path, archive_dir: Option<&Path>) -> io::Result<()> {
 
     // Archive created successfully, remove the original directory
     remove_dir_robust(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deleting_an_avd_payload_takes_its_registering_ini_too() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+
+        std::fs::create_dir(dir.join("Pixel_7.avd")).expect("avd dir");
+        std::fs::write(dir.join("Pixel_7.avd/userdata.img"), b"x").expect("payload");
+        std::fs::write(dir.join("Pixel_7.ini"), "path=/somewhere\n").expect("ini");
+
+        std::fs::create_dir(dir.join("Keep_Me.avd")).expect("other avd");
+        std::fs::write(dir.join("Keep_Me.ini"), "path=/elsewhere\n").expect("other ini");
+
+        delete_path(&dir.join("Pixel_7.avd")).expect("delete");
+
+        assert!(!dir.join("Pixel_7.avd").exists());
+        // An orphaned .ini makes the emulator list an AVD that cannot launch.
+        assert!(!dir.join("Pixel_7.ini").exists());
+        assert!(dir.join("Keep_Me.avd").exists());
+        assert!(dir.join("Keep_Me.ini").exists());
+    }
+
+    #[test]
+    fn deleting_a_plain_cache_dir_leaves_siblings_alone() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+
+        std::fs::create_dir(dir.join("Cache")).expect("cache dir");
+        std::fs::write(dir.join("Cache.ini"), "not an avd\n").expect("lookalike");
+
+        delete_path(&dir.join("Cache")).expect("delete");
+
+        assert!(!dir.join("Cache").exists());
+        assert!(dir.join("Cache.ini").exists());
+    }
 }

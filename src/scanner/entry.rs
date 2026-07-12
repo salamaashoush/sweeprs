@@ -24,6 +24,8 @@ pub enum Category {
     SystemJunk,
     MobileBackup,
     LlmModels,
+    Simulator,
+    AiTools,
     StaleProject,
 }
 
@@ -48,6 +50,8 @@ impl Category {
         Self::SystemJunk,
         Self::MobileBackup,
         Self::LlmModels,
+        Self::Simulator,
+        Self::AiTools,
         Self::StaleProject,
     ];
 
@@ -68,6 +72,8 @@ impl Category {
             | Self::SystemJunk
             | Self::MobileBackup
             | Self::LlmModels
+            | Self::Simulator
+            | Self::AiTools
             | Self::StaleProject => SafetyLevel::Caution,
             Self::Trash | Self::LargeFile | Self::Duplicate => SafetyLevel::Danger,
         }
@@ -95,6 +101,8 @@ impl fmt::Display for Category {
             Self::SystemJunk => write!(f, "System Junk"),
             Self::MobileBackup => write!(f, "Mobile Backups"),
             Self::LlmModels => write!(f, "LLM Models"),
+            Self::Simulator => write!(f, "Simulators"),
+            Self::AiTools => write!(f, "AI Tools"),
             Self::StaleProject => write!(f, "Stale Projects"),
         }
     }

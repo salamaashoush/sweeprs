@@ -4,13 +4,14 @@ use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::cleaner;
 use crate::config::Config;
-use crate::rules::{brew, docker, git_data};
 use crate::scanner;
 use crate::scanner::ScanUpdate;
 use crate::scanner::entry::{ScanResult, ScannedEntry};
 use crate::tui::tree::{RowRef, Tree};
 use crate::tui::views::View;
+use crate::virtual_entry;
 
 /// Maximum age of a cached scan result before it's ignored (2 hours).
 const SCAN_CACHE_TTL_SECS: u64 = 7200;
@@ -274,17 +275,9 @@ impl App {
             }
             KeyCode::Char('o') => {
                 if let Some(&RowRef::Entry(ci, gi, ei)) = visible.get(self.cursor) {
-                    let path_str = self.tree.categories[ci].groups[gi].entries[ei]
-                        .path
-                        .display()
-                        .to_string();
-                    if !path_str.starts_with("docker:")
-                        && !path_str.starts_with("brew:")
-                        && !path_str.starts_with("journal:")
-                        && !path_str.starts_with("pacman:")
-                        && !path_str.starts_with("apt:")
-                        && !path_str.starts_with("dnf:")
-                    {
+                    let entry_path = &self.tree.categories[ci].groups[gi].entries[ei].path;
+                    let path_str = entry_path.display().to_string();
+                    if !virtual_entry::is_virtual(entry_path) {
                         if cfg!(target_os = "macos") {
                             let _ = std::process::Command::new("open")
                                 .args(["-R", &path_str])
@@ -398,26 +391,14 @@ impl App {
 
     fn execute_deletion(&mut self) {
         for entry in &self.selected_for_deletion {
-            let path_str = entry.path.display().to_string();
-
-            if path_str.starts_with("docker:") {
-                let _ = docker::clean_docker_entry(&path_str);
-                continue;
-            }
-            if path_str.starts_with("brew:") {
-                let _ = brew::clean_brew_entry(&path_str);
-                continue;
-            }
-            if path_str.starts_with("git-gc:") {
-                let _ = git_data::clean_git_gc(&path_str);
+            if virtual_entry::is_virtual(&entry.path) {
+                let _ = virtual_entry::clean(&entry.path.display().to_string());
                 continue;
             }
 
             let path = &entry.path;
-            if path.is_dir() {
-                let _ = std::fs::remove_dir_all(path);
-            } else if path.is_file() {
-                let _ = std::fs::remove_file(path);
+            if path.is_dir() || path.is_file() {
+                let _ = cleaner::delete_path(path);
             }
         }
         self.selected_for_deletion.clear();

@@ -9,6 +9,7 @@ use crate::tui::app::App;
 use crate::tui::theme;
 use crate::tui::tree::{CheckState, RowRef};
 use crate::util;
+use crate::virtual_entry;
 
 const BAR_WIDTH: usize = 10;
 
@@ -196,7 +197,7 @@ fn render_entry_row(
     let check = if entry.checked { "[x]" } else { "[ ]" };
     let safety_color = safety_to_color(entry.safety);
 
-    let label = util::tilde_path(&entry.path);
+    let label = virtual_entry::display(&entry.path);
 
     let size_str = util::human_size(entry.size);
 
