@@ -111,6 +111,9 @@ enum Command {
         /// Generate default config file
         #[arg(long)]
         init: bool,
+        /// Overwrite an existing config file with the defaults
+        #[arg(long)]
+        force: bool,
         /// Show current config path
         #[arg(long)]
         path: bool,
@@ -152,6 +155,7 @@ enum CategoryArg {
     Llm,
     Simulator,
     Ai,
+    AgentSessions,
     StaleProject,
 }
 
@@ -178,6 +182,7 @@ impl CategoryArg {
             Self::Llm => Category::LlmModels,
             Self::Simulator => Category::Simulator,
             Self::Ai => Category::AiTools,
+            Self::AgentSessions => Category::AgentSession,
             Self::StaleProject => Category::StaleProject,
         }
     }
@@ -206,6 +211,7 @@ enum CleanTarget {
     Llm,
     Simulator,
     Ai,
+    AgentSessions,
     StaleProject,
 }
 
@@ -233,6 +239,7 @@ impl CleanTarget {
             Self::Llm => Some(Category::LlmModels),
             Self::Simulator => Some(Category::Simulator),
             Self::Ai => Some(Category::AiTools),
+            Self::AgentSessions => Some(Category::AgentSession),
             Self::StaleProject => Some(Category::StaleProject),
         }
     }
@@ -400,6 +407,7 @@ fn main() -> Result<()> {
                 skip_confirm: yes,
                 include_unsafe,
                 action,
+                config: config.clone(),
             };
             cleaner::clean(&result.entries, &options)?;
         }
@@ -425,9 +433,17 @@ fn main() -> Result<()> {
                 monitor::start()?;
             }
         }
-        Some(Command::Config { init, path }) => {
+        Some(Command::Config { init, force, path }) => {
             if init {
                 let config_path = config::Config::config_path();
+                // Writing the defaults over a config someone has tuned discards
+                // their excludes and category choices with no way back.
+                if config_path.exists() && !force {
+                    anyhow::bail!(
+                        "Config already exists at {}. Pass --force to replace it with the defaults.",
+                        config_path.display()
+                    );
+                }
                 config::Config::save_default(&config_path)?;
                 println!("Config written to: {}", config_path.display());
             } else if path {
@@ -466,6 +482,7 @@ fn main() -> Result<()> {
                     Category::LlmModels => "llm",
                     Category::Simulator => "simulator",
                     Category::AiTools => "ai",
+                    Category::AgentSession => "agent-sessions",
                     Category::StaleProject => "stale-project",
                 };
                 println!("{:<20} {:<10} {}", cat, cat.default_safety(), arg);

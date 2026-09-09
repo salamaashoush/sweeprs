@@ -66,13 +66,15 @@ cache_rule!(
     ".cache/pip/wheels"
 );
 
+// `~/.local/share/mise` is deliberately absent: `toolchain.rs` walks it
+// per tool version so the active toolchain survives. Claiming the whole
+// directory here would delete the toolchain the user is running on.
 cache_rule!(
     MiseCacheRule,
     "mise cache",
     Category::PackageCache,
     SafetyLevel::Safe,
-    ".cache/mise",
-    ".local/share/mise"
+    ".cache/mise"
 );
 
 cache_rule!(
@@ -155,6 +157,109 @@ cache_rule!(
     ".terraform.d/plugins"
 );
 
+// Browser and runtime binaries that test tooling downloads on demand. Each is
+// hundreds of megabytes per version and every one of these tools re-fetches
+// silently on the next run.
+cache_rule!(
+    PlaywrightBrowsersRule,
+    "Playwright browsers",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/ms-playwright",
+    ".cache/ms-playwright"
+);
+
+cache_rule!(
+    PuppeteerBrowsersRule,
+    "Puppeteer browsers",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/puppeteer",
+    ".cache/puppeteer"
+);
+
+cache_rule!(
+    CypressBinariesRule,
+    "Cypress binaries",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/Cypress",
+    ".cache/Cypress"
+);
+
+cache_rule!(
+    ElectronDownloadsRule,
+    "Electron downloads",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/electron",
+    "Library/Caches/electron-builder",
+    ".cache/electron",
+    ".cache/electron-builder"
+);
+
+cache_rule!(
+    NodeGypHeadersRule,
+    "node-gyp headers",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/node-gyp",
+    ".cache/node-gyp",
+    ".node-gyp",
+    ".electron-gyp"
+);
+
+cache_rule!(
+    YarnBerryCacheRule,
+    "Yarn Berry cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".yarn/berry/cache"
+);
+
+cache_rule!(
+    GolangciLintCacheRule,
+    "golangci-lint cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/golangci-lint",
+    ".cache/golangci-lint"
+);
+
+cache_rule!(
+    CarthageCacheRule,
+    "Carthage cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    "Library/Caches/org.carthage.CarthageKit"
+);
+
+cache_rule!(
+    GradleNativeRule,
+    "Gradle native dependencies",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".gradle/native"
+);
+
+cache_rule!(
+    AndroidBuildCacheRule,
+    "Android build cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".android/build-cache",
+    ".android/cache"
+);
+
+// Re-cloning every podspec is a multi-minute network operation, not a rebuild.
+cache_rule!(
+    CocoaPodsReposRule,
+    "CocoaPods spec repos",
+    Category::PackageCache,
+    SafetyLevel::Caution,
+    ".cocoapods/repos"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(BazelCacheRule),
@@ -176,5 +281,16 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(HelmCacheRule),
         Box::new(MinikubeCacheRule),
         Box::new(TerraformPluginsRule),
+        Box::new(PlaywrightBrowsersRule),
+        Box::new(PuppeteerBrowsersRule),
+        Box::new(CypressBinariesRule),
+        Box::new(ElectronDownloadsRule),
+        Box::new(NodeGypHeadersRule),
+        Box::new(YarnBerryCacheRule),
+        Box::new(GolangciLintCacheRule),
+        Box::new(CarthageCacheRule),
+        Box::new(GradleNativeRule),
+        Box::new(AndroidBuildCacheRule),
+        Box::new(CocoaPodsReposRule),
     ]
 }

@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::cleaner;
 use crate::config::Config;
+use crate::rules;
 use crate::scanner;
 use crate::scanner::ScanUpdate;
 use crate::scanner::entry::{ScanResult, ScannedEntry};
@@ -113,6 +114,12 @@ impl App {
                     duration_secs,
                     disk_info,
                 } => {
+                    // Overlaps only resolve once every rule has reported, so the
+                    // running total shown while scanning is provisional.
+                    let deduped =
+                        rules::deduplicate_entries(std::mem::take(&mut self.result.entries));
+                    self.result.total_size = deduped.iter().map(|e| e.size).sum();
+                    self.result.entries = deduped;
                     self.result.scan_duration_secs = Some(duration_secs);
                     self.result.disk_info = disk_info;
                     finished = true;
@@ -392,7 +399,11 @@ impl App {
     fn execute_deletion(&mut self) {
         for entry in &self.selected_for_deletion {
             if virtual_entry::is_virtual(&entry.path) {
-                let _ = virtual_entry::clean(&entry.path.display().to_string());
+                let _ = virtual_entry::clean(
+                    &entry.path.display().to_string(),
+                    &self.config,
+                    self.config.git_gc_timeout(),
+                );
                 continue;
             }
 

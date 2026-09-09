@@ -26,6 +26,7 @@ pub enum Category {
     LlmModels,
     Simulator,
     AiTools,
+    AgentSession,
     StaleProject,
 }
 
@@ -52,6 +53,7 @@ impl Category {
         Self::LlmModels,
         Self::Simulator,
         Self::AiTools,
+        Self::AgentSession,
         Self::StaleProject,
     ];
 
@@ -75,7 +77,12 @@ impl Category {
             | Self::Simulator
             | Self::AiTools
             | Self::StaleProject => SafetyLevel::Caution,
-            Self::Trash | Self::LargeFile | Self::Duplicate => SafetyLevel::Danger,
+            // Transcripts, chat history and rewind checkpoints have no second
+            // copy anywhere. Deleting them is not a cache miss, it is the
+            // record of the work.
+            Self::AgentSession | Self::Trash | Self::LargeFile | Self::Duplicate => {
+                SafetyLevel::Danger
+            }
         }
     }
 }
@@ -103,6 +110,7 @@ impl fmt::Display for Category {
             Self::LlmModels => write!(f, "LLM Models"),
             Self::Simulator => write!(f, "Simulators"),
             Self::AiTools => write!(f, "AI Tools"),
+            Self::AgentSession => write!(f, "AI Agent Sessions"),
             Self::StaleProject => write!(f, "Stale Projects"),
         }
     }

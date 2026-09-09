@@ -12,6 +12,9 @@ use super::CleanupRule;
 
 /// Directories within a stale project that can be safely deleted and rebuilt.
 const BUILD_DIRS: &[&str] = &["target", "build", "_build", ".build", "dist", "out"];
+
+/// A repo on a stalled network mount must not hold up the whole scan.
+const GIT_LOG_TIMEOUT: Duration = Duration::from_secs(10);
 const DEPS_DIRS: &[&str] = &["node_modules", "vendor", ".venv", "venv", ".tox"];
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
@@ -74,17 +77,12 @@ fn scan_stale_project(root: &Path, stale_days: u64) -> Vec<ScannedEntry> {
 }
 
 fn get_days_since_last_commit(repo: &Path) -> Option<u64> {
-    let output = std::process::Command::new("git")
-        .args(["log", "-1", "--format=%ct"])
-        .current_dir(repo)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
+    let repo = repo.display().to_string();
+    let output = crate::util::run_with_timeout(
+        &["git", "-C", &repo, "log", "-1", "--format=%ct"],
+        GIT_LOG_TIMEOUT,
+    )
+    .success()?;
 
     let timestamp_str = String::from_utf8_lossy(&output.stdout);
     let timestamp: u64 = timestamp_str.trim().parse().ok()?;

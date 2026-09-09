@@ -109,12 +109,6 @@ impl CleanupRule for BuildArtifactRule {
             dirs.push((derived_data, "Xcode DerivedData"));
         }
 
-        // Gradle caches
-        let gradle_home = home.join(".gradle/caches");
-        if gradle_home.exists() {
-            dirs.push((gradle_home, "Gradle caches"));
-        }
-
         collect_entries(&dirs, Category::BuildArtifact)
     }
 }

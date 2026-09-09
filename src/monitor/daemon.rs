@@ -147,6 +147,7 @@ fn run_auto_clean(config: &Config) {
         skip_confirm: true,
         include_unsafe: false,
         action: cleaner::CleanAction::Delete,
+        config: config.clone(),
     };
 
     if let Err(e) = cleaner::clean(&safe_entries, &options) {

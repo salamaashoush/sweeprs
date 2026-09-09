@@ -78,7 +78,7 @@ impl CleanupRule for ClaudeCodeVersionsRule {
             let size = if path.is_dir() {
                 walker::dir_size(&path)
             } else {
-                path.metadata().map_or(0, |m| m.len())
+                walker::file_size(&path)
             };
             if size == 0 {
                 continue;

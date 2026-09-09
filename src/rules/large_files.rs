@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::rules::CleanupRule;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
+use crate::scanner::walker;
 use crate::util;
 
 pub struct LargeFilesRule;
@@ -39,7 +40,7 @@ impl CleanupRule for LargeFilesRule {
                     continue;
                 }
 
-                let size = entry.metadata().map_or(0, |m| m.len());
+                let size = walker::file_size(entry.path());
                 if size >= threshold {
                     let name = entry
                         .path()
@@ -86,7 +87,7 @@ impl CleanupRule for LargeFilesRule {
                     continue;
                 }
 
-                let size = entry.metadata().map_or(0, |m| m.len());
+                let size = walker::file_size(entry.path());
                 if size >= threshold {
                     let name = path
                         .file_name()

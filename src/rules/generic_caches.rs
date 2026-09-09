@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+
 use crate::config::Config;
 use crate::rules::CleanupRule;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
@@ -120,49 +122,48 @@ impl CleanupRule for GenericCacheDirsRule {
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let mut entries = Vec::new();
         let Some(cache_dir) = dirs::cache_dir() else {
-            return entries;
+            return Vec::new();
         };
-        if !cache_dir.exists() {
-            return entries;
-        }
-
         let Ok(read_dir) = std::fs::read_dir(&cache_dir) else {
-            return entries;
+            return Vec::new();
         };
 
-        for entry_result in read_dir.flatten() {
-            let path = entry_result.path();
-            if !path.is_dir() {
-                continue;
-            }
+        // Sizing these one after another was the slowest single rule on a
+        // developer machine: the cache root holds a long tail of directories,
+        // several of them gigabytes deep.
+        let candidates: Vec<_> = read_dir
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if !path.is_dir() {
+                    return None;
+                }
+                let dirname = path.file_name()?.to_string_lossy().into_owned();
+                if KNOWN_CACHE_DIRS.contains(&dirname.as_str()) {
+                    return None;
+                }
+                Some((path, dirname))
+            })
+            .collect();
 
-            let dirname = match path.file_name() {
-                Some(n) => n.to_string_lossy().into_owned(),
-                None => continue,
-            };
-
-            if KNOWN_CACHE_DIRS.contains(&dirname.as_str()) {
-                continue;
-            }
-
-            let size = walker::dir_size(&path);
-            if size < MIN_CACHE_SIZE {
-                continue;
-            }
-
-            entries.push(ScannedEntry {
-                path,
-                size,
-                category: Category::AppCache,
-                safety: SafetyLevel::Safe,
-                description: format!("~/.cache/{dirname}"),
-                item_count: None,
-            });
-        }
-
-        entries
+        candidates
+            .par_iter()
+            .filter_map(|(path, dirname)| {
+                let size = walker::dir_size(path);
+                if size < MIN_CACHE_SIZE {
+                    return None;
+                }
+                Some(ScannedEntry {
+                    path: path.clone(),
+                    size,
+                    category: Category::AppCache,
+                    safety: SafetyLevel::Safe,
+                    description: format!("~/.cache/{dirname}"),
+                    item_count: None,
+                })
+            })
+            .collect()
     }
 }
 

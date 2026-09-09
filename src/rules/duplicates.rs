@@ -69,6 +69,9 @@ impl CleanupRule for DuplicatesRule {
                 if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                     continue;
                 }
+                // Grouping key is the logical length: two identical files always
+                // share it, while their allocated size can differ on a
+                // copy-on-write filesystem.
                 let size = entry.metadata().map_or(0, |m| m.len());
                 if size >= min_size {
                     size_groups
@@ -87,7 +90,7 @@ impl CleanupRule for DuplicatesRule {
 
         let entries: Vec<ScannedEntry> = candidate_groups
             .par_iter()
-            .flat_map(|(size, paths)| {
+            .flat_map(|(_size, paths)| {
                 // Phase 2a: partial hash to narrow candidates
                 let mut partial_groups: FxHashMap<u64, Vec<&PathBuf>> = FxHashMap::default();
                 for path in paths {
@@ -122,14 +125,17 @@ impl CleanupRule for DuplicatesRule {
                                 .file_name()
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_default();
+                            // Report the blocks this copy occupies, not the
+                            // logical length shared with the original.
+                            let freed = crate::scanner::walker::file_size(dup);
                             group_entries.push(ScannedEntry {
                                 path: (*dup).clone(),
-                                size: *size,
+                                size: freed,
                                 category: Category::Duplicate,
                                 safety: SafetyLevel::Danger,
                                 description: format!(
                                     "Duplicate: {name} ({}, {n} copies)",
-                                    util::human_size(*size),
+                                    util::human_size(freed),
                                     n = dups.len()
                                 ),
                                 item_count: Some(dups.len()),

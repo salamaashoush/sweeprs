@@ -2,12 +2,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use yansi::Paint;
 
+use crate::config::Config;
 use crate::rules::simulator;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::util;
@@ -65,6 +67,9 @@ pub struct CleanOptions {
     pub skip_confirm: bool,
     pub include_unsafe: bool,
     pub action: CleanAction,
+    /// Rules that stand for a command rather than a path read their thresholds
+    /// back out of the config at clean time.
+    pub config: Config,
 }
 
 pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
@@ -141,7 +146,7 @@ pub fn clean(entries: &[ScannedEntry], options: &CleanOptions) -> Result<()> {
         CleanAction::Archive(dir) => (true, dir.as_deref()),
         CleanAction::Delete => (false, None),
     };
-    delete_entries(&to_clean, clean_size, archive, archive_dir);
+    delete_entries(&to_clean, clean_size, archive, archive_dir, &options.config);
     Ok(())
 }
 
@@ -410,6 +415,7 @@ fn delete_entries(
     total_size: u64,
     archive: bool,
     archive_dir: Option<&Path>,
+    config: &Config,
 ) {
     // Separate entries into fast (parallel filesystem ops) and slow (sequential git-gc, docker)
     let mut fast_entries: Vec<&ScannedEntry> = Vec::new();
@@ -457,7 +463,7 @@ fn delete_entries(
 
     let action = if archive { "Archiving" } else { "Cleaning" };
 
-    run_slow_operations(&slow_entries, &cleaned, &errors);
+    run_slow_operations(&slow_entries, &cleaned, &errors, config);
 
     // Phase 2: fast parallel filesystem deletions with progress bar
     if !fast_entries.is_empty() {
@@ -551,10 +557,15 @@ pub fn delete_path(path: &Path) -> io::Result<()> {
 }
 
 /// Run slow sequential operations (git gc, docker prune, brew cleanup) with per-item spinners.
+///
+/// These are external tools with no progress output of their own once their
+/// stderr is piped, so the spinner carries the elapsed time: a repack that takes
+/// four minutes has to look like work in progress, not like a hang.
 fn run_slow_operations(
     entries: &[&ScannedEntry],
     cleaned: &AtomicU64,
     errors: &Mutex<Vec<(PathBuf, io::Error)>>,
+    config: &Config,
 ) {
     if entries.is_empty() {
         return;
@@ -566,25 +577,29 @@ fn run_slow_operations(
 
         let spinner = ProgressBar::new_spinner();
         spinner.set_style(
-            ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
                 .expect("valid template")
                 .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
         );
         spinner.set_message(display.clone());
-        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+        spinner.enable_steady_tick(Duration::from_millis(80));
 
-        let result = virtual_entry::clean(&path_str);
+        let started = Instant::now();
+        let result = virtual_entry::clean(&path_str, config, config.git_gc_timeout());
+        let elapsed = started.elapsed();
 
         spinner.finish_and_clear();
 
         match result {
-            Ok(()) => {
-                cleaned.fetch_add(entry.size, Ordering::Relaxed);
+            Ok(freed) => {
+                let freed = freed.unwrap_or(entry.size);
+                cleaned.fetch_add(freed, Ordering::Relaxed);
                 println!(
-                    "  {} {} (freed ~{})",
+                    "  {} {} (freed {}, {:.1}s)",
                     "Done".green(),
                     display,
-                    util::human_size(entry.size)
+                    util::human_size(freed),
+                    elapsed.as_secs_f64(),
                 );
             }
             Err(e) => {
@@ -603,9 +618,9 @@ fn measure_freed(entry: &ScannedEntry, result: &Result<(), io::Error>) -> u64 {
     }
     if entry.path.exists() {
         let remaining = if entry.path.is_dir() {
-            crate::scanner::walker::dir_size(&entry.path)
+            crate::scanner::walker::dir_size_uncached(&entry.path)
         } else {
-            entry.path.metadata().map_or(0, |m| m.len())
+            crate::scanner::walker::file_size(&entry.path)
         };
         entry.size.saturating_sub(remaining)
     } else {

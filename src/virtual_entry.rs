@@ -12,8 +12,10 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use crate::rules::{brew, docker, git_data};
+use crate::config::Config;
+use crate::rules::{brew, docker, empty_dirs, git_data, ide};
 use crate::util;
 
 const PREFIXES: &[&str] = &[
@@ -26,6 +28,8 @@ const PREFIXES: &[&str] = &[
     "dnf:",
     "simctl-runtime:",
     "simctl-device:",
+    "empty-dirs:",
+    "editor-history:",
 ];
 
 pub fn is_virtual(path: &Path) -> bool {
@@ -49,10 +53,7 @@ pub fn display(path: &Path) -> String {
 /// The command the entry stands for, shown while it runs.
 pub fn label(path_str: &str) -> String {
     if let Some(repo) = path_str.strip_prefix("git-gc:") {
-        return format!(
-            "git gc --aggressive {}",
-            util::tilde_path(&PathBuf::from(repo))
-        );
+        return format!("git gc {}", util::tilde_path(&PathBuf::from(repo)));
     }
     if let Some(kind) = path_str.strip_prefix("docker:") {
         return format!("docker prune {kind}");
@@ -71,6 +72,18 @@ pub fn label(path_str: &str) -> String {
             format!("xcrun simctl delete ({count} devices)")
         };
     }
+    if let Some(history) = path_str.strip_prefix("editor-history:") {
+        return format!(
+            "prune local file history in {}",
+            util::tilde_path(&PathBuf::from(history))
+        );
+    }
+    if let Some(root) = path_str.strip_prefix("empty-dirs:") {
+        return format!(
+            "remove empty directories in {}",
+            util::tilde_path(&PathBuf::from(root))
+        );
+    }
     if path_str.starts_with("journal:") {
         return "journalctl --vacuum-size=100M".to_owned();
     }
@@ -86,7 +99,12 @@ pub fn label(path_str: &str) -> String {
     path_str.to_owned()
 }
 
-pub fn clean(path_str: &str) -> io::Result<()> {
+/// Run the command an entry stands for.
+///
+/// The `Ok` payload is the number of bytes actually reclaimed, when the
+/// underlying tool can be asked; `None` means only the scan-time estimate is
+/// available.
+pub fn clean(path_str: &str, config: &Config, git_gc_timeout: Duration) -> io::Result<Option<u64>> {
     if path_str.starts_with("docker:") {
         return docker::clean_docker_entry(path_str);
     }
@@ -94,22 +112,28 @@ pub fn clean(path_str: &str) -> io::Result<()> {
         return brew::clean_brew_entry(path_str);
     }
     if path_str.starts_with("simctl-runtime:") || path_str.starts_with("simctl-device:") {
-        return crate::rules::simulator::clean_simulator_entry(path_str);
+        return crate::rules::simulator::clean_simulator_entry(path_str).map(|()| None);
     }
     if path_str.starts_with("git-gc:") {
-        return git_data::clean_git_gc(path_str);
+        return git_data::clean_git_gc(path_str, git_gc_timeout);
+    }
+    if path_str.starts_with("empty-dirs:") {
+        return empty_dirs::clean_empty_dirs(path_str);
+    }
+    if path_str.starts_with("editor-history:") {
+        return ide::clean_editor_history(path_str, config);
     }
     if path_str.starts_with("journal:") {
-        return linux_clean(LinuxCleanup::Journal);
+        return linux_clean(LinuxCleanup::Journal).map(|()| None);
     }
     if path_str.starts_with("pacman:") {
-        return linux_clean(LinuxCleanup::Pacman);
+        return linux_clean(LinuxCleanup::Pacman).map(|()| None);
     }
     if path_str.starts_with("apt:") {
-        return linux_clean(LinuxCleanup::Apt);
+        return linux_clean(LinuxCleanup::Apt).map(|()| None);
     }
     if path_str.starts_with("dnf:") {
-        return linux_clean(LinuxCleanup::Dnf);
+        return linux_clean(LinuxCleanup::Dnf).map(|()| None);
     }
 
     Err(io::Error::new(
@@ -161,7 +185,14 @@ mod tests {
 
     #[test]
     fn cleaning_a_real_path_is_rejected_rather_than_guessed() {
-        assert!(clean("/Users/me/Library/Caches/foo").is_err());
+        assert!(
+            clean(
+                "/Users/me/Library/Caches/foo",
+                &Config::default(),
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
     }
 
     #[test]

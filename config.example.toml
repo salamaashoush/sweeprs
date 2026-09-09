@@ -99,6 +99,22 @@ duplicate_dirs = []
 # Git repos with no commits for this many days have their build/deps flagged as stale
 stale_project_days = 60
 
+# A repo is only offered for `git gc` when the repack can hand back at least this
+# many bytes, measured from `git count-objects -v`. A repo that is already packed
+# reclaims nothing, so repacking it is minutes of CPU for no space. Default: 50 MB.
+git_gc_min_reclaim = 52428800
+
+# Seconds a single `git gc` may run before it is stopped. sweeprs runs a plain
+# `git gc` (never `--aggressive`, never `--prune=now`, never expiring reflogs),
+# so this is a guard against a wedged repo rather than the normal case.
+git_gc_timeout_secs = 300
+
+# An AI agent session -- transcript, chat thread, rewind checkpoint -- is only
+# offered once it has gone untouched for this many days. Below it, --resume,
+# --continue and rewind can still reach the session. Also gates the editors'
+# own local file history. Default: 30 days.
+agent_session_days = 30
+
 # Enable/disable individual categories. All enabled by default except duplicates.
 [categories.enabled]
 package_cache = true
@@ -120,6 +136,9 @@ mobile_backup = true
 llm_models = true
 simulator = true
 ai_tools = true
+# Transcripts and rewind checkpoints. Scanned by default, but the category is
+# Danger, so `sweeprs clean` never touches it without an explicit request.
+agent_session = true
 stale_project = true
 
 [monitor]

@@ -1,8 +1,9 @@
-use std::process::Command;
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rustc_hash::FxHashMap;
+
+use crate::util;
 
 /// Maximum time to wait for any single CLI command.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -22,48 +23,6 @@ pub struct CliResult {
 /// Each command has a 5-second timeout to prevent any single command from
 /// blocking the entire cache.
 pub static CLI_CACHE: LazyLock<FxHashMap<&'static str, CliResult>> = LazyLock::new(prefetch_all);
-
-/// Run a command with a timeout. Returns None if the command times out or fails to spawn.
-fn run_with_timeout(args: &[&str], timeout: Duration) -> Option<std::process::Output> {
-    let mut child = Command::new(args[0])
-        .args(&args[1..])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .ok()?;
-
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = child.stdout.take().map_or_else(Vec::new, |mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                });
-                let stderr = child.stderr.take().map_or_else(Vec::new, |mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                });
-                return Some(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => return None,
-        }
-    }
-}
 
 fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
     let mut commands: Vec<(&str, &[&str])> = vec![
@@ -111,17 +70,19 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
             .iter()
             .map(|&(key, args)| {
                 s.spawn(move || {
-                    let cli_result = match run_with_timeout(args, COMMAND_TIMEOUT) {
-                        Some(output) => CliResult {
+                    let cli_result = match util::run_with_timeout(args, COMMAND_TIMEOUT) {
+                        util::CommandOutcome::Completed(output) => CliResult {
                             success: output.status.success(),
                             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
                         },
-                        None => CliResult {
-                            success: false,
-                            stdout: String::new(),
-                            stderr: String::new(),
-                        },
+                        util::CommandOutcome::TimedOut | util::CommandOutcome::NotSpawned(_) => {
+                            CliResult {
+                                success: false,
+                                stdout: String::new(),
+                                stderr: String::new(),
+                            }
+                        }
                     };
 
                     (key, cli_result)

@@ -77,6 +77,17 @@ pub struct CategoriesConfig {
     /// Days since last commit to consider a project stale (default: 90)
     #[serde(alias = "staleProjectDays")]
     pub stale_project_days: u64,
+    /// Minimum bytes a `git gc` must be able to reclaim before a repo is listed.
+    /// Repacking a repo that is already tidy costs minutes and returns nothing.
+    #[serde(alias = "gitGcMinReclaim")]
+    pub git_gc_min_reclaim: u64,
+    /// Seconds a single `git gc` may run before it is stopped.
+    #[serde(alias = "gitGcTimeoutSecs")]
+    pub git_gc_timeout_secs: u64,
+    /// An AI agent session is only offered once untouched for this many days.
+    /// Below it, `--resume` and rewind still reach the session.
+    #[serde(alias = "agentSessionDays")]
+    pub agent_session_days: u64,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -119,6 +130,8 @@ pub struct EnabledCategories {
     pub simulator: bool,
     #[serde(alias = "aiTools")]
     pub ai_tools: bool,
+    #[serde(alias = "agentSession")]
+    pub agent_session: bool,
     #[serde(alias = "staleProject")]
     pub stale_project: bool,
 }
@@ -208,6 +221,9 @@ impl Default for CategoriesConfig {
             duplicate_dirs: Vec::new(),
             enabled: EnabledCategories::default(),
             stale_project_days: 60,
+            git_gc_min_reclaim: 52_428_800, // 50 MB
+            git_gc_timeout_secs: 300,
+            agent_session_days: 30,
         }
     }
 }
@@ -235,6 +251,7 @@ impl Default for EnabledCategories {
             llm_models: true,
             simulator: true,
             ai_tools: true,
+            agent_session: true,
             stale_project: true,
         }
     }
@@ -339,6 +356,7 @@ impl Config {
             Category::LlmModels => self.categories.enabled.llm_models,
             Category::Simulator => self.categories.enabled.simulator,
             Category::AiTools => self.categories.enabled.ai_tools,
+            Category::AgentSession => self.categories.enabled.agent_session,
             Category::StaleProject => self.categories.enabled.stale_project,
         }
     }
@@ -367,6 +385,7 @@ impl Config {
             "llm" | "llm-models" => Some(Category::LlmModels),
             "simulator" | "simulators" => Some(Category::Simulator),
             "ai" | "ai-tools" => Some(Category::AiTools),
+            "agent-sessions" | "agent-session" | "sessions" => Some(Category::AgentSession),
             "stale-project" | "stale-projects" => Some(Category::StaleProject),
             _ => None,
         }
@@ -404,6 +423,10 @@ impl Config {
             .iter()
             .filter_map(|s| Self::parse_category(s))
             .collect()
+    }
+
+    pub fn git_gc_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.categories.git_gc_timeout_secs.max(1))
     }
 
     pub fn expand_path(path: &str) -> PathBuf {

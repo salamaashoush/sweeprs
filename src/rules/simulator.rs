@@ -84,11 +84,11 @@ fn parse_runtime_list(stdout: &str) -> Vec<Runtime> {
 /// recursive walk of tens of thousands of read-only files on every scan.
 /// Deleting the runtime reclaims the dmg's bytes and nothing more.
 fn runtime_size(runtime: &Runtime) -> u64 {
-    Path::new(CORE_SIMULATOR_ROOT)
-        .join("Images")
-        .join(format!("{}.dmg", runtime.identifier))
-        .metadata()
-        .map_or(0, |m| m.len())
+    walker::file_size(
+        &Path::new(CORE_SIMULATOR_ROOT)
+            .join("Images")
+            .join(format!("{}.dmg", runtime.identifier)),
+    )
 }
 
 impl CleanupRule for SimulatorRuntimeRule {
@@ -362,7 +362,11 @@ fn scan_avd_dir(dir: &Path) -> Vec<ScannedEntry> {
 
         // An AVD is the `.avd` payload plus a sibling `.ini` registering it.
         // Both go together on delete, so both count toward the size.
-        let size = walker::dir_size(&path) + avd_ini(&path).map_or(0, |i| i.len());
+        let size = walker::dir_size(&path)
+            + avd_ini(&path).map_or(0, |i| {
+                use std::os::unix::fs::MetadataExt;
+                i.blocks() * 512
+            });
         if size == 0 {
             continue;
         }

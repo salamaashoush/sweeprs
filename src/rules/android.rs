@@ -5,14 +5,6 @@ use crate::scanner::entry::{Category, SafetyLevel};
 // in `simulator.rs` alongside the iOS runtimes.
 
 cache_rule!(
-    AndroidGradleWrapperRule,
-    "Gradle wrapper distributions",
-    Category::BuildArtifact,
-    SafetyLevel::Safe,
-    ".gradle/wrapper/dists"
-);
-
-cache_rule!(
     AndroidGradleDaemonRule,
     "Gradle daemon logs",
     Category::LogFile,
@@ -21,8 +13,5 @@ cache_rule!(
 );
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
-    vec![
-        Box::new(AndroidGradleWrapperRule),
-        Box::new(AndroidGradleDaemonRule),
-    ]
+    vec![Box::new(AndroidGradleDaemonRule)]
 }

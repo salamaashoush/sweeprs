@@ -6,7 +6,37 @@ use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
 use crate::scanner::project_index::PROJECT_INDEX;
 use crate::scanner::walker;
 
-const ORPHAN_MARKERS: &[(&str, &str)] = &[("target", "Cargo.toml"), (".build", "Package.swift")];
+/// `(dir_name, marker_file, contents_that_prove_it_is_build_output)`.
+///
+/// A missing marker file is not enough on its own: `target` and `.build` are
+/// ordinary English words, and a directory of someone's data named `target/`
+/// must never be offered as a safe delete. Each candidate has to also contain
+/// something only the build tool writes.
+const ORPHAN_MARKERS: &[(&str, &str, &[&str])] = &[
+    (
+        "target",
+        "Cargo.toml",
+        &["CACHEDIR.TAG", ".rustc_info.json", "debug", "release"],
+    ),
+    (
+        ".build",
+        "Package.swift",
+        &["checkouts", "debug", "release", "workspace-state.json"],
+    ),
+];
+
+/// Files and directories that only a package manager puts inside `node_modules`.
+const NODE_MODULES_FINGERPRINTS: &[&str] = &[
+    ".package-lock.json",
+    ".yarn-state.yml",
+    ".modules.yaml",
+    ".pnpm",
+    ".bin",
+];
+
+fn contains_any(dir: &std::path::Path, names: &[&str]) -> bool {
+    names.iter().any(|name| dir.join(name).exists())
+}
 
 pub struct OrphanedNodeModulesRule;
 
@@ -29,6 +59,10 @@ impl CleanupRule for OrphanedNodeModulesRule {
                 let package_json = parent.join("package.json");
 
                 if package_json.exists() {
+                    return None;
+                }
+
+                if !contains_any(dir, NODE_MODULES_FINGERPRINTS) {
                     return None;
                 }
 
@@ -64,7 +98,7 @@ impl CleanupRule for OrphanedBuildArtifactsRule {
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         ORPHAN_MARKERS
             .par_iter()
-            .flat_map(|(dir_name, marker_file)| {
+            .flat_map(|(dir_name, marker_file, fingerprints)| {
                 let artifact_dirs = PROJECT_INDEX.find_dirs_by_name(dir_name);
 
                 artifact_dirs
@@ -72,6 +106,10 @@ impl CleanupRule for OrphanedBuildArtifactsRule {
                     .filter_map(|dir| {
                         let parent = dir.parent()?;
                         if parent.join(marker_file).exists() {
+                            return None;
+                        }
+
+                        if !contains_any(dir, fingerprints) {
                             return None;
                         }
 

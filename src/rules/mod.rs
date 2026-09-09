@@ -1,3 +1,4 @@
+pub mod agent_sessions;
 pub mod ai_tools;
 pub mod android;
 pub mod app_cache;
@@ -32,6 +33,7 @@ pub mod macos;
 pub mod macos_extra;
 pub mod mobile;
 pub mod orphan_detection;
+pub mod project_caches;
 pub mod pycache;
 pub mod simulator;
 pub mod stale_project;
@@ -125,11 +127,13 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(llm::rules());
     rules.extend(dev_caches::rules());
     rules.extend(test_artifacts::rules());
+    rules.extend(project_caches::rules());
     rules.extend(core_dumps::rules());
     rules.extend(electron_data::rules());
     rules.extend(virtualization::rules());
     rules.extend(simulator::rules());
     rules.extend(ai_tools::rules());
+    rules.extend(agent_sessions::rules());
     rules.extend(generic_caches::rules());
     rules.extend(orphan_detection::rules());
     #[cfg(target_os = "macos")]
@@ -158,6 +162,8 @@ const CLI_CACHE_CATEGORIES: &[Category] = &[
 /// but only the caches that are actually needed for the requested categories.
 /// This prevents rayon thread starvation while avoiding unnecessary work.
 fn warm_caches_for(categories: &[Category]) {
+    crate::scanner::walker::reset_size_cache();
+
     let need_cli = categories.iter().any(|c| CLI_CACHE_CATEGORIES.contains(c));
     let need_project = categories
         .iter()
@@ -183,6 +189,8 @@ fn warm_caches_for(categories: &[Category]) {
 
 /// Warm all caches (used for full scan).
 fn warm_caches_all() {
+    crate::scanner::walker::reset_size_cache();
+
     std::thread::scope(|s| {
         s.spawn(|| {
             let _ = &*crate::scanner::cli_cache::CLI_CACHE;
@@ -191,6 +199,142 @@ fn warm_caches_all() {
             let _ = &*crate::scanner::project_index::PROJECT_INDEX;
         });
     });
+}
+
+/// Collapse entries that overlap on disk so the reported total is the space a
+/// clean would actually return.
+///
+/// Rules are written independently and several of them legitimately look at
+/// overlapping roots -- `~/.gradle/caches` is both a package cache and build
+/// output, a gitignored `dist/` is also a stale-project build dir. Counting both
+/// inflates the headline figure by whatever the overlap is worth.
+///
+/// An entry nested inside another is dropped, because cleaning the outer one
+/// removes it too. The exception is an outer entry that is *less* safe than the
+/// inner one: there, dropping the inner entry would push the user towards the
+/// riskier action to reclaim the same bytes, so both are kept and the inner size
+/// is deducted from the outer.
+pub fn deduplicate_entries(mut entries: Vec<ScannedEntry>) -> Vec<ScannedEntry> {
+    entries.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.safety.cmp(&b.safety))
+            .then_with(|| b.size.cmp(&a.size))
+    });
+    // Equal paths are adjacent and sorted safest-first, so the survivor is the
+    // one that lets the user reclaim those bytes at the lowest risk. It inherits
+    // what the other rule had to say -- "Stale: signer (412 days)" is the reason
+    // to act on a `target/` that would otherwise read as routine build output.
+    entries.dedup_by(|later, earlier| {
+        if later.path != earlier.path {
+            return false;
+        }
+        if !earlier.description.contains(later.description.as_str()) {
+            earlier.description = format!("{} | {}", earlier.description, later.description);
+        }
+        true
+    });
+
+    let mut kept: Vec<ScannedEntry> = Vec::with_capacity(entries.len());
+    // Indices into `kept` forming the chain of ancestors of the current entry.
+    let mut ancestors: Vec<usize> = Vec::new();
+
+    for entry in entries {
+        if crate::virtual_entry::is_virtual(&entry.path) {
+            kept.push(entry);
+            continue;
+        }
+
+        while ancestors
+            .last()
+            .is_some_and(|&i| !entry.path.starts_with(&kept[i].path))
+        {
+            ancestors.pop();
+        }
+
+        if let Some(&parent) = ancestors.last() {
+            if kept[parent].safety <= entry.safety {
+                continue;
+            }
+            kept[parent].size = kept[parent].size.saturating_sub(entry.size);
+        }
+
+        ancestors.push(kept.len());
+        kept.push(entry);
+    }
+
+    kept
+}
+
+/// Deduplicate a rule sweep and total up what is left.
+fn finalize(entries: Vec<ScannedEntry>) -> ScanResult {
+    let entries = deduplicate_entries(entries);
+    let total_size = entries.iter().map(|e| e.size).sum();
+    ScanResult {
+        entries,
+        total_size,
+        disk_info: None,
+        scan_duration_secs: None,
+    }
+}
+
+/// Set `SWEEPRS_PROFILE=1` to print how long each rule took, slowest first.
+///
+/// Scan time is dominated by a handful of rules walking dense trees, and which
+/// ones those are depends entirely on what the machine has on it.
+fn profiling_enabled() -> bool {
+    std::env::var_os("SWEEPRS_PROFILE").is_some_and(|v| v != "0")
+}
+
+fn run_rules(
+    rules: &[&(impl std::ops::Deref<Target = dyn CleanupRule> + Sync)],
+    config: &Config,
+    progress: Option<&ScanProgress>,
+) -> Vec<ScannedEntry> {
+    use rayon::prelude::*;
+
+    let profile = profiling_enabled();
+    let timings: std::sync::Mutex<Vec<(std::time::Duration, &'static str, usize)>> =
+        std::sync::Mutex::new(Vec::new());
+
+    let entries: Vec<ScannedEntry> = rules
+        .par_iter()
+        .flat_map(|rule| {
+            if let Some(p) = progress {
+                if let Ok(mut name) = p.current_rule.lock() {
+                    *name = rule.name().to_string();
+                }
+            }
+
+            let started = std::time::Instant::now();
+            let found = rule.scan(config);
+            if profile {
+                if let Ok(mut timings) = timings.lock() {
+                    timings.push((started.elapsed(), rule.name(), found.len()));
+                }
+            }
+
+            if let Some(p) = progress {
+                let rule_bytes: u64 = found.iter().map(|e| e.size).sum();
+                p.bytes_found.fetch_add(rule_bytes, Ordering::Relaxed);
+                p.items_found.fetch_add(found.len(), Ordering::Relaxed);
+                p.rules_done.fetch_add(1, Ordering::Relaxed);
+            }
+            found
+        })
+        .collect();
+
+    if profile {
+        if let Ok(mut timings) = timings.lock() {
+            timings.sort_by_key(|(elapsed, _, _)| std::cmp::Reverse(*elapsed));
+            eprintln!("rule timings (slowest first):");
+            for (elapsed, name, count) in timings.iter() {
+                eprintln!("  {:>8.2}s  {name} ({count} items)", elapsed.as_secs_f64());
+            }
+        }
+    }
+
+    entries
 }
 
 pub struct RuleEngine;
@@ -202,8 +346,6 @@ impl RuleEngine {
     }
 
     pub fn scan_all(&self, config: &Config, progress: Option<&ScanProgress>) -> ScanResult {
-        use rayon::prelude::*;
-
         warm_caches_all();
 
         if let Some(p) = progress {
@@ -219,32 +361,7 @@ impl RuleEngine {
             p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
         }
 
-        let entries: Vec<ScannedEntry> = filtered_rules
-            .par_iter()
-            .flat_map(|rule| {
-                if let Some(p) = progress {
-                    if let Ok(mut name) = p.current_rule.lock() {
-                        *name = rule.name().to_string();
-                    }
-                }
-                let found = rule.scan(config);
-                if let Some(p) = progress {
-                    let rule_bytes: u64 = found.iter().map(|e| e.size).sum();
-                    p.bytes_found.fetch_add(rule_bytes, Ordering::Relaxed);
-                    p.items_found.fetch_add(found.len(), Ordering::Relaxed);
-                    p.rules_done.fetch_add(1, Ordering::Relaxed);
-                }
-                found
-            })
-            .collect();
-
-        let total_size = entries.iter().map(|e| e.size).sum();
-        ScanResult {
-            entries,
-            total_size,
-            disk_info: None,
-            scan_duration_secs: None,
-        }
+        finalize(run_rules(&filtered_rules, config, progress))
     }
 
     pub fn scan_all_streaming(&self, config: &Config, tx: &mpsc::Sender<ScanUpdate>) {
@@ -278,8 +395,6 @@ impl RuleEngine {
         config: &Config,
         progress: Option<&ScanProgress>,
     ) -> ScanResult {
-        use rayon::prelude::*;
-
         warm_caches_for(categories);
 
         if let Some(p) = progress {
@@ -295,32 +410,7 @@ impl RuleEngine {
             p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
         }
 
-        let entries: Vec<ScannedEntry> = filtered_rules
-            .par_iter()
-            .flat_map(|rule| {
-                if let Some(p) = progress {
-                    if let Ok(mut name) = p.current_rule.lock() {
-                        *name = rule.name().to_string();
-                    }
-                }
-                let found = rule.scan(config);
-                if let Some(p) = progress {
-                    let rule_bytes: u64 = found.iter().map(|e| e.size).sum();
-                    p.bytes_found.fetch_add(rule_bytes, Ordering::Relaxed);
-                    p.items_found.fetch_add(found.len(), Ordering::Relaxed);
-                    p.rules_done.fetch_add(1, Ordering::Relaxed);
-                }
-                found
-            })
-            .collect();
-
-        let total_size = entries.iter().map(|e| e.size).sum();
-        ScanResult {
-            entries,
-            total_size,
-            disk_info: None,
-            scan_duration_secs: None,
-        }
+        finalize(run_rules(&filtered_rules, config, progress))
     }
 
     pub fn scan_category(
@@ -329,8 +419,6 @@ impl RuleEngine {
         config: &Config,
         progress: Option<&ScanProgress>,
     ) -> ScanResult {
-        use rayon::prelude::*;
-
         warm_caches_for(&[category]);
 
         if let Some(p) = progress {
@@ -346,32 +434,7 @@ impl RuleEngine {
             p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
         }
 
-        let entries: Vec<ScannedEntry> = filtered_rules
-            .par_iter()
-            .flat_map(|rule| {
-                if let Some(p) = progress {
-                    if let Ok(mut name) = p.current_rule.lock() {
-                        *name = rule.name().to_string();
-                    }
-                }
-                let found = rule.scan(config);
-                if let Some(p) = progress {
-                    let rule_bytes: u64 = found.iter().map(|e| e.size).sum();
-                    p.bytes_found.fetch_add(rule_bytes, Ordering::Relaxed);
-                    p.items_found.fetch_add(found.len(), Ordering::Relaxed);
-                    p.rules_done.fetch_add(1, Ordering::Relaxed);
-                }
-                found
-            })
-            .collect();
-
-        let total_size = entries.iter().map(|e| e.size).sum();
-        ScanResult {
-            entries,
-            total_size,
-            disk_info: None,
-            scan_duration_secs: None,
-        }
+        finalize(run_rules(&filtered_rules, config, progress))
     }
 }
 
@@ -416,3 +479,89 @@ macro_rules! cache_rule {
 }
 
 pub(crate) use cache_rule;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::entry::SafetyLevel;
+    use std::path::PathBuf;
+
+    fn entry(path: &str, size: u64, safety: SafetyLevel) -> ScannedEntry {
+        ScannedEntry {
+            path: PathBuf::from(path),
+            size,
+            category: Category::PackageCache,
+            safety,
+            description: path.to_owned(),
+            item_count: None,
+        }
+    }
+
+    fn paths(entries: &[ScannedEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|e| e.path.display().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_nested_entry_is_not_counted_twice() {
+        let kept = deduplicate_entries(vec![
+            entry("/home/me/.gradle/caches", 900, SafetyLevel::Safe),
+            entry("/home/me/.gradle/caches/modules-2", 400, SafetyLevel::Safe),
+        ]);
+        assert_eq!(paths(&kept), ["/home/me/.gradle/caches"]);
+        assert_eq!(kept.iter().map(|e| e.size).sum::<u64>(), 900);
+    }
+
+    #[test]
+    fn the_same_path_from_two_rules_survives_at_its_safest() {
+        let kept = deduplicate_entries(vec![
+            entry("/home/me/proj/dist", 100, SafetyLevel::Caution),
+            entry("/home/me/proj/dist", 100, SafetyLevel::Safe),
+        ]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].safety, SafetyLevel::Safe);
+    }
+
+    #[test]
+    fn a_safe_child_of_a_riskier_parent_stays_reachable() {
+        // Deleting the whole toolchain dir is Caution; its download cache is not.
+        // Collapsing them would make the user take the risky action for those bytes.
+        let kept = deduplicate_entries(vec![
+            entry("/home/me/.mise", 1000, SafetyLevel::Caution),
+            entry("/home/me/.mise/downloads", 250, SafetyLevel::Safe),
+        ]);
+        assert_eq!(paths(&kept), ["/home/me/.mise", "/home/me/.mise/downloads"]);
+        assert_eq!(kept.iter().map(|e| e.size).sum::<u64>(), 1000);
+    }
+
+    #[test]
+    fn a_sibling_sharing_a_name_prefix_is_left_alone() {
+        let kept = deduplicate_entries(vec![
+            entry("/home/me/cache", 10, SafetyLevel::Safe),
+            entry("/home/me/cache-old", 20, SafetyLevel::Safe),
+        ]);
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn deeply_nested_entries_collapse_into_the_outermost() {
+        let kept = deduplicate_entries(vec![
+            entry("/a", 100, SafetyLevel::Safe),
+            entry("/a/b", 50, SafetyLevel::Safe),
+            entry("/a/b/c", 25, SafetyLevel::Safe),
+            entry("/z", 5, SafetyLevel::Safe),
+        ]);
+        assert_eq!(paths(&kept), ["/a", "/z"]);
+    }
+
+    #[test]
+    fn virtual_entries_never_absorb_or_get_absorbed() {
+        let kept = deduplicate_entries(vec![
+            entry("git-gc:/home/me/proj", 100, SafetyLevel::Caution),
+            entry("git-gc:/home/me/proj/nested", 50, SafetyLevel::Caution),
+        ]);
+        assert_eq!(kept.len(), 2);
+    }
+}

@@ -182,7 +182,7 @@ fn parse_brew_size(s: &str) -> u64 {
 }
 
 /// Run the appropriate brew command for a synthetic `brew:` entry.
-pub fn clean_brew_entry(entry_path: &str) -> Result<(), std::io::Error> {
+pub fn clean_brew_entry(entry_path: &str) -> Result<Option<u64>, std::io::Error> {
     let type_key = entry_path.strip_prefix("brew:").unwrap_or(entry_path);
 
     let args: &[&str] = match type_key {
@@ -195,20 +195,32 @@ pub fn clean_brew_entry(entry_path: &str) -> Result<(), std::io::Error> {
         }
     };
 
-    let status = std::process::Command::new("brew")
+    let output = std::process::Command::new("brew")
         .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "brew {} failed with exit code {status}",
-            args.join(" ")
-        )))
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "brew {} failed with exit code {}",
+            args.join(" "),
+            output.status
+        )));
     }
+
+    // brew prints its own tally; prefer it over the dry-run estimate the scan used.
+    Ok(parse_freed(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Read `==> This operation has freed approximately 1.2GB of disk space.`
+fn parse_freed(stdout: &str) -> Option<u64> {
+    stdout.lines().rev().find_map(|line| {
+        let rest = line.split_once("freed approximately")?.1;
+        let amount = rest.split_whitespace().next()?;
+        Some(parse_brew_size(amount)).filter(|bytes| *bytes > 0)
+    })
 }
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {

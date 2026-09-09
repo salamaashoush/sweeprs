@@ -134,18 +134,7 @@ fn get_disk_info_inner(full: bool) -> Result<DiskInfo> {
 
 #[cfg(target_os = "macos")]
 fn get_purgeable_bytes(available_bytes: u64) -> Option<u64> {
-    let xml = if let Some(cached) = cli_cache::get("diskutil_info_root") {
-        cached.stdout.clone()
-    } else {
-        let output = std::process::Command::new("diskutil")
-            .args(["info", "-plist", "/"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        String::from_utf8_lossy(&output.stdout).to_string()
-    };
+    let xml = read_root_plist()?;
 
     let container_free = parse_plist_integer(&xml, "APFSContainerFree")?;
     available_bytes.checked_sub(container_free)
@@ -205,6 +194,13 @@ fn get_icloud_local_bytes() -> Option<u64> {
     if total > 0 { Some(total) } else { None }
 }
 
+/// Bytes held by the sealed system volume plus installed applications.
+///
+/// The system half is read from the volume itself. It used to be a hard-coded
+/// 12 GiB, which is a different number on every macOS release and on every
+/// machine, and quoting it back to the user as measured disk usage was simply
+/// wrong. When the volume cannot be read the system half is left out rather
+/// than guessed.
 #[cfg(target_os = "macos")]
 fn get_system_app_bytes() -> Option<u64> {
     let apps_dir = std::path::Path::new("/Applications");
@@ -213,9 +209,30 @@ fn get_system_app_bytes() -> Option<u64> {
     } else {
         0
     };
-    let system_size: u64 = 12_884_901_888; // 12 GiB
+
+    let system_size = read_root_plist()
+        .as_deref()
+        .and_then(|xml| parse_plist_integer(xml, "CapacityInUse"))
+        .unwrap_or(0);
+
     let total = apps_size + system_size;
     if total > 0 { Some(total) } else { None }
+}
+
+/// `diskutil info -plist /`, from the prefetch cache when it ran.
+#[cfg(target_os = "macos")]
+fn read_root_plist() -> Option<String> {
+    if let Some(cached) = cli_cache::get("diskutil_info_root") {
+        return Some(cached.stdout.clone());
+    }
+    let output = std::process::Command::new("diskutil")
+        .args(["info", "-plist", "/"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 #[cfg(target_os = "macos")]

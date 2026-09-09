@@ -140,7 +140,7 @@ fn parse_docker_size(s: &str) -> Option<u64> {
 /// one of the known types from `docker system df` (e.g. "Images", "Build Cache").
 ///
 /// Returns `Ok(())` on success, or an error if the command fails.
-pub fn clean_docker_entry(entry_path: &str) -> Result<(), std::io::Error> {
+pub fn clean_docker_entry(entry_path: &str) -> Result<Option<u64>, std::io::Error> {
     let type_key = entry_path.strip_prefix("docker:").unwrap_or(entry_path);
 
     let Some(args) = DOCKER_TYPES
@@ -154,21 +154,33 @@ pub fn clean_docker_entry(entry_path: &str) -> Result<(), std::io::Error> {
         ));
     };
 
-    let status = std::process::Command::new("docker")
+    // `docker system df` reports what the daemon believes is reclaimable; prune
+    // reports what it actually removed. Report the second.
+    let output = std::process::Command::new("docker")
         .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
             "docker {} failed with exit code {}",
             args.join(" "),
-            status
-        )))
+            output.status
+        )));
     }
+
+    Ok(parse_reclaimed(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Pull the byte count out of prune's closing `Total reclaimed space: 4.608GB`.
+fn parse_reclaimed(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("Total reclaimed space:"))
+        .and_then(|value| parse_docker_size(value.trim()))
 }
 
 impl CleanupRule for DockerRule {
@@ -187,4 +199,33 @@ impl CleanupRule for DockerRule {
 
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![Box::new(DockerRule)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_output_yields_the_bytes_it_actually_removed() {
+        let stdout = "deleted: sha256:abc\ndeleted: sha256:def\n\nTotal reclaimed space: 4.608GB\n";
+        assert_eq!(parse_reclaimed(stdout), Some(4_608_000_000));
+    }
+
+    #[test]
+    fn a_prune_that_removed_nothing_reports_zero_rather_than_the_estimate() {
+        assert_eq!(parse_reclaimed("Total reclaimed space: 0B\n"), Some(0));
+    }
+
+    #[test]
+    fn output_without_the_summary_line_falls_back_to_the_estimate() {
+        assert_eq!(parse_reclaimed("some other output\n"), None);
+    }
+
+    #[test]
+    fn reclaimable_column_is_parsed_across_units() {
+        assert_eq!(parse_docker_size("512MB"), Some(512_000_000));
+        assert_eq!(parse_docker_size("1.5kB"), Some(1_500));
+        assert_eq!(parse_docker_size("0B"), Some(0));
+        assert_eq!(parse_docker_size("nonsense"), None);
+    }
 }

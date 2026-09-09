@@ -20,18 +20,20 @@ safely with dry-run by default.
 ## Features
 
 - **Interactive TUI** -- tree-based browser with real-time scan progress, search/filter, and clipboard support
-- **21 scan categories** -- caches, build artifacts, dependencies, Docker, Homebrew, simulators, AI tools, LLM models, cloud CLIs, and more
+- **22 scan categories** -- caches, build artifacts, dependencies, Docker, Homebrew, simulators, AI tools, LLM models, cloud CLIs, and more
 - **Safety levels** -- entries classified as Safe, Caution, or Danger with safe-only cleanup by default
 - **Multi-category clean** -- clean multiple categories in one command: `sweeprs clean cache build deps --force`
 - **Default clean categories** -- configure which categories to clean by default so `sweeprs clean --force` does the right thing
 - **Glob filtering** -- `--filter` and `--exclude` patterns to narrow results by path
 - **Size filtering** -- `--min-size` to focus on large items
 - **Global excludes** -- configure paths to never touch in your config file
-- **Parallel scanning** -- rayon-powered concurrent rule execution
+- **Parallel scanning** -- rayon-powered concurrent rule execution; run `sweeprs scan` with `SWEEPRS_PROFILE=1` to print per-rule timings, slowest first
 - **Platform optimized** -- uses native OS primitives for fast scanning on each platform
 - **Streaming results** -- TUI updates as each rule completes, no waiting for full scan
 - **Docker and Homebrew** -- detects and prunes containers, images, volumes, caches, and unneeded formulae
 - **Gitignore-aware** -- finds large directories ignored by git in your projects
+- **No double counting** -- overlapping findings from different rules are collapsed so the reported total is the space a clean actually returns
+- **Measured, not estimated** -- sizes come from allocated blocks (so a sparse disk image is not counted at its logical length), and `docker prune`, `brew cleanup` and `git gc` report back what they actually reclaimed
 - **LLM model detection** -- finds Ollama, HuggingFace, LM Studio, GPT4All, Jan AI, and llama.cpp caches
 - **Duplicate detection** -- XXH3-based file deduplication (opt-in)
 - **Background monitor** -- daemon that alerts when disk usage exceeds thresholds
@@ -281,11 +283,11 @@ sweeprs config --path
 
 | Category | CLI Arg | Safety | What it finds |
 |---|---|---|---|
-| Package Caches | `cache` | Safe | npm, yarn, pnpm, bun, cargo, pip, go, maven, bundler, neovim caches |
-| Build Artifacts | `build` | Safe | Rust target/, Maven, Gradle, CMake outputs, Xcode (macOS), gitignored dirs |
-| Installed Dependencies | `deps` | Safe | node_modules/, .venv/, vendor/ |
+| Package Caches | `cache` | Safe | npm, yarn (incl. Berry), pnpm, bun, cargo, pip, go, maven, NuGet, bundler, neovim caches, Playwright/Puppeteer/Cypress/Electron browser downloads, node-gyp headers, golangci-lint, Carthage, CocoaPods |
+| Build Artifacts | `build` | Safe | Rust target/, Maven, Gradle, CMake outputs, Xcode (macOS), gitignored dirs, framework caches (.next, .nuxt, .svelte-kit, .astro, .turbo, .angular, .parcel-cache, .gradle, .cxx), git repack leftovers, `git gc` candidates |
+| Installed Dependencies | `deps` | Safe | node_modules/, .venv/, vendor/, CocoaPods `Pods/`, Terraform providers |
 | Browser Caches | `browser` | Safe | Chrome, Firefox, Brave, Edge, Safari (macOS) caches |
-| IDE Caches | `ide` | Safe | VS Code, Cursor, JetBrains, Zed, Sublime, Xcode (macOS) caches |
+| IDE Caches | `ide` | Safe | VS Code, Cursor, JetBrains, Zed, Sublime, Xcode (macOS) caches, workspace state for deleted folders, `state.vscdb` rollback copies, aged local file history |
 | App Caches | `app-cache` | Safe | Slack, Spotify, Discord, Teams, Electron app caches |
 | Rust Toolchains | `toolchain` | Caution | Old rustup toolchains, Python/Node/Ruby versions, Conda environments |
 | Docker | `docker` | Caution | Images, containers, volumes, build cache |
@@ -298,6 +300,7 @@ sweeprs config --path
 | LLM Models | `llm` | Caution | Ollama, HuggingFace, LM Studio, GPT4All, Jan AI, llama.cpp |
 | Simulators | `simulator` | Caution | iOS simulator runtimes and devices, Android AVDs and system images |
 | AI Tools | `ai` | Caution | Superseded Claude Code versions, Claude Desktop VM, Claude/Cursor/Codex/Copilot caches and downloaded extensions |
+| AI Agent Sessions | `agent-sessions` | Danger | Transcripts, chat threads, rewind checkpoints, scratchpads and clean pushed worktrees from Claude Code, Codex, Cursor, Gemini CLI and Copilot CLI -- only once idle past the configured age |
 | Trash | `trash` | Danger | Trash contents (~/.Trash on macOS, ~/.local/share/Trash on Linux) |
 | Large Files | `large-files` | Danger | Files over 500 MB (configurable) |
 | Duplicates | `duplicates` | Danger | Identical files by content hash (disabled by default) |
@@ -312,6 +315,75 @@ Beyond the main categories above, sweeprs includes specialized rules for:
 - **Containers** -- Podman, Lima VMs, Colima (alternative Docker runtimes)
 - **Cloud CLIs** -- gcloud, AWS CLI, Terraform plugins, Azure CLI caches
 - **Homebrew** -- outdated downloads, autoremove candidates
+
+### Git repositories
+
+Linked worktrees are found as well as plain clones: in a worktree `.git` is a
+file, not a directory, and testing for a directory made every worktree on the
+machine invisible to the rules that work from a project root.
+
+Rules about a project's *contents* -- gitignored output, staleness, empty
+directories -- run per worktree, because each has its own files. Rules about a
+repository's *history* -- gc, LFS, rerere -- run once per object store, since a
+stack of worktrees shares one. Keying those off working trees would repack the
+same repository once per worktree and count the same reclaimable bytes that many
+times.
+
+sweeprs offers a `git gc` for a repository only when `git count-objects -v` says a
+repack can actually hand space back -- loose objects, leftover garbage, or an
+untidy pack count. A repository that is already packed is skipped, however large
+its `.git` is, and the figure shown is derived from those numbers rather than
+from a percentage of the directory size. After the run, the space reported is
+the measured difference, not the estimate.
+
+The command run is a plain `git gc`. sweeprs does not use `--aggressive` (a full
+delta-chain rebuild that costs minutes on a large repository for a marginal
+gain), does not pass `--prune=now` (which drops the grace period protecting
+objects a concurrent git process just wrote), and never expires reflogs -- those
+are what makes a lost commit recoverable. Repositories with a rebase, merge,
+cherry-pick, bisect, or another git process in flight are left alone entirely --
+including when the operation is running in one of the linked worktrees, which
+holds references into the same shared object store.
+
+Interrupted repacks leave `tmp_pack_*` / `tmp_obj_*` files behind, sometimes
+gigabytes of them. Those are reported separately once they are more than a day
+old, and deleting them is an ordinary file removal.
+
+### AI agent sessions
+
+An agent's transcript is the only record of a conversation, and its checkpoints
+are the only way to undo an edit it made. Neither is re-downloadable, so nothing
+in this category is ever marked Safe and the category itself is Danger: the
+default clean skips it, and so does the `[c]aution+safe` answer at the
+confirmation prompt. Reaching it takes `sweeprs clean agent-sessions --all` or
+picking it by number.
+
+What makes any of it offerable is age. Only sessions untouched for longer than
+`categories.agent_session_days` (default 30) are listed, because below that
+`--resume`, `--continue` and rewind can still reach them. The age is the newest
+file anywhere under the session, not the directory's own timestamp.
+
+Covered: Claude Code transcripts and file checkpoints, Codex rollout
+transcripts, Cursor agent sessions, chat threads and edit snapshots, and the
+scratch and log directories of Gemini CLI and Copilot CLI. State whose session
+was already deleted -- a checkpoint directory with no transcript left -- is
+listed without an age gate, since nothing can reach it at any age.
+
+Agent worktrees (`~/.cursor/worktrees/<project>/<branch>`) are real source
+trees, so age is not what makes them safe to offer. Each one is only listed once
+git confirms there is nothing in it to lose: `status --porcelain` clean, and a
+HEAD that some remote branch already contains. A worktree that fails either
+check -- or that git cannot open, because its `gitdir` was pruned -- is reported
+with the reason and a size of zero, so cleaning skips it while you still get
+told it is there.
+
+Session scratchpads (`/tmp/claude-<uid>/<project>/<session>/`) follow the
+transcripts: aged out on the same cutoff, or listed immediately when the session
+they belong to no longer exists.
+
+Dotfile roots are never named. `~/.claude`, `~/.codex` and `~/.cursor` also hold
+credentials, config, memories, rules and skills; only individual subdirectories
+that the tool regenerates are listed.
 
 ## Filter Patterns
 
