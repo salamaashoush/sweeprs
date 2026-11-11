@@ -1,3 +1,4 @@
+pub mod agent_leftovers;
 pub mod agent_sessions;
 pub mod ai_tools;
 pub mod android;
@@ -9,6 +10,7 @@ pub mod cache;
 pub mod cloud_cache;
 pub mod conda;
 pub mod containers;
+pub mod contents;
 pub mod core_dumps;
 pub mod dev_caches;
 pub mod docker;
@@ -21,6 +23,7 @@ pub mod empty_dirs;
 pub mod generic_caches;
 pub mod git_data;
 pub mod gitignored;
+pub mod held_space;
 pub mod ide;
 pub mod large_files;
 #[cfg(target_os = "linux")]
@@ -135,6 +138,8 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
     rules.extend(simulator::rules());
     rules.extend(ai_tools::rules());
     rules.extend(agent_sessions::rules());
+    rules.push(Box::new(agent_leftovers::AgentLeftoversRule));
+    rules.push(Box::new(held_space::HeldSpaceRule));
     rules.extend(generic_caches::rules());
     rules.extend(orphan_detection::rules());
     #[cfg(target_os = "macos")]
@@ -146,6 +151,7 @@ static RULES: LazyLock<Vec<Box<dyn CleanupRule>>> = LazyLock::new(|| {
 
 /// Categories whose rules use the `PROJECT_INDEX` cache.
 const PROJECT_INDEX_CATEGORIES: &[Category] = &[
+    Category::Toolchain,
     Category::BuildArtifact,
     Category::InstalledDeps,
     Category::StaleProject,
@@ -160,47 +166,52 @@ const CLI_CACHE_CATEGORIES: &[Category] = &[
     Category::Simulator,
 ];
 
-/// Eagerly initialize `LazyLock` caches on dedicated OS threads,
-/// but only the caches that are actually needed for the requested categories.
-/// This prevents rayon thread starvation while avoiding unnecessary work.
-fn warm_caches_for(categories: &[Category]) {
+/// Run `scan` while the shared caches warm up beside it.
+///
+/// Rules that need neither cache start at once instead of waiting for the
+/// slowest prefetched command; a rule that needs one blocks on its `LazyLock`
+/// until it is ready. The project index is built on a pool of its own: its
+/// parallel walk would otherwise queue behind global workers that are blocked
+/// waiting for the index, which deadlocks once every worker is waiting.
+fn with_warm_caches<T: Send>(
+    need_cli: bool,
+    need_project: bool,
+    scan: impl FnOnce() -> T + Send,
+) -> T {
     crate::scanner::walker::reset_size_cache();
-
-    let need_cli = categories.iter().any(|c| CLI_CACHE_CATEGORIES.contains(c));
-    let need_project = categories
-        .iter()
-        .any(|c| PROJECT_INDEX_CATEGORIES.contains(c));
-
-    if !need_cli && !need_project {
-        return;
-    }
 
     std::thread::scope(|s| {
         if need_cli {
             s.spawn(|| {
-                let _ = &*crate::scanner::cli_cache::CLI_CACHE;
+                timed_phase("CLI prefetch", crate::scanner::cli_cache::prefetch);
             });
         }
         if need_project {
             s.spawn(|| {
-                let _ = &*crate::scanner::project_index::PROJECT_INDEX;
+                timed_phase("project index", || {
+                    let build = || {
+                        let _ = &*crate::scanner::project_index::PROJECT_INDEX;
+                    };
+                    match rayon::ThreadPoolBuilder::new().build() {
+                        Ok(pool) => pool.install(build),
+                        Err(_) => build(),
+                    }
+                });
             });
         }
-    });
+        let result = scan();
+        crate::scanner::walker::persist_listings();
+        result
+    })
 }
 
-/// Warm all caches (used for full scan).
-fn warm_caches_all() {
-    crate::scanner::walker::reset_size_cache();
-
-    std::thread::scope(|s| {
-        s.spawn(|| {
-            let _ = &*crate::scanner::cli_cache::CLI_CACHE;
-        });
-        s.spawn(|| {
-            let _ = &*crate::scanner::project_index::PROJECT_INDEX;
-        });
-    });
+fn caches_needed_for(categories: &[Category]) -> (bool, bool) {
+    (
+        categories.iter().any(|c| CLI_CACHE_CATEGORIES.contains(c)),
+        categories
+            .iter()
+            .any(|c| PROJECT_INDEX_CATEGORIES.contains(c)),
+    )
 }
 
 /// Collapse entries that overlap on disk so the reported total is the space a
@@ -286,7 +297,7 @@ pub fn deduplicate_entries(mut entries: Vec<ScannedEntry>) -> Vec<ScannedEntry> 
 
 /// Deduplicate a rule sweep and total up what is left.
 fn finalize(entries: Vec<ScannedEntry>) -> ScanResult {
-    let entries = deduplicate_entries(entries);
+    let entries = deduplicate_entries(drop_protected(entries));
     let total_size = entries.iter().map(|e| e.size).sum();
     ScanResult {
         entries,
@@ -296,12 +307,46 @@ fn finalize(entries: Vec<ScannedEntry>) -> ScanResult {
     }
 }
 
+/// Drop entries the cleaner would refuse, so a scan never offers what a clean
+/// cannot do.
+fn drop_protected(mut entries: Vec<ScannedEntry>) -> Vec<ScannedEntry> {
+    entries.retain(|entry| {
+        if crate::virtual_entry::is_virtual(&entry.path) {
+            return true;
+        }
+        match crate::guard::check(&entry.path) {
+            Ok(()) => true,
+            Err(refusal) => {
+                if profiling_enabled() {
+                    eprintln!("dropped ({}): {refusal}", entry.description);
+                }
+                false
+            }
+        }
+    });
+    entries
+}
+
 /// Set `SWEEPRS_PROFILE=1` to print how long each rule took, slowest first.
 ///
 /// Scan time is dominated by a handful of rules walking dense trees, and which
 /// ones those are depends entirely on what the machine has on it.
 fn profiling_enabled() -> bool {
     std::env::var_os("SWEEPRS_PROFILE").is_some_and(|v| v != "0")
+}
+
+/// Run one scan phase, reporting its time under `SWEEPRS_PROFILE`.
+///
+/// The cache warm-up before the rules and the disk summary after them are part
+/// of what the user waits for, so a profile of the rules alone misplaces the time.
+pub fn timed_phase<T>(label: &str, phase: impl FnOnce() -> T) -> T {
+    if !profiling_enabled() {
+        return phase();
+    }
+    let start = std::time::Instant::now();
+    let value = phase();
+    eprintln!("  {:>8.2}s  phase: {label}", start.elapsed().as_secs_f64());
+    value
 }
 
 fn run_rules(
@@ -360,28 +405,30 @@ impl RuleEngine {
     }
 
     pub fn scan_all(&self, config: &Config, progress: Option<&ScanProgress>) -> ScanResult {
-        warm_caches_all();
-
-        if let Some(p) = progress {
-            p.phase.store(1, Ordering::Relaxed);
-        }
-
         let filtered_rules: Vec<_> = RULES
             .iter()
             .filter(|rule| config.is_category_enabled(rule.category()))
             .collect();
+        Self::scan_rules(&filtered_rules, (true, true), config, progress)
+    }
 
+    fn scan_rules(
+        rules: &[&(impl std::ops::Deref<Target = dyn CleanupRule> + Sync)],
+        (need_cli, need_project): (bool, bool),
+        config: &Config,
+        progress: Option<&ScanProgress>,
+    ) -> ScanResult {
         if let Some(p) = progress {
-            p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
+            p.phase.store(1, Ordering::Relaxed);
+            p.rules_total.store(rules.len(), Ordering::Relaxed);
         }
-
-        finalize(run_rules(&filtered_rules, config, progress))
+        with_warm_caches(need_cli, need_project, || {
+            finalize(run_rules(rules, config, progress))
+        })
     }
 
     pub fn scan_all_streaming(&self, config: &Config, tx: &mpsc::Sender<ScanUpdate>) {
         use rayon::prelude::*;
-
-        warm_caches_all();
 
         let filtered_rules: Vec<_> = RULES
             .iter()
@@ -392,15 +439,17 @@ impl RuleEngine {
             rules_total: filtered_rules.len(),
         });
 
-        filtered_rules
-            .par_iter()
-            .for_each_with(tx.clone(), |tx, rule| {
-                let entries = rule.scan(config);
-                let _ = tx.send(ScanUpdate::RuleComplete {
-                    rule_name: rule.name(),
-                    entries,
+        with_warm_caches(true, true, || {
+            filtered_rules
+                .par_iter()
+                .for_each_with(tx.clone(), |tx, rule| {
+                    let entries = drop_protected(rule.scan(config));
+                    let _ = tx.send(ScanUpdate::RuleComplete {
+                        rule_name: rule.name(),
+                        entries,
+                    });
                 });
-            });
+        });
     }
 
     pub fn scan_categories(
@@ -409,22 +458,16 @@ impl RuleEngine {
         config: &Config,
         progress: Option<&ScanProgress>,
     ) -> ScanResult {
-        warm_caches_for(categories);
-
-        if let Some(p) = progress {
-            p.phase.store(1, Ordering::Relaxed);
-        }
-
         let filtered_rules: Vec<_> = RULES
             .iter()
             .filter(|rule| categories.contains(&rule.category()))
             .collect();
-
-        if let Some(p) = progress {
-            p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
-        }
-
-        finalize(run_rules(&filtered_rules, config, progress))
+        Self::scan_rules(
+            &filtered_rules,
+            caches_needed_for(categories),
+            config,
+            progress,
+        )
     }
 
     pub fn scan_category(
@@ -433,22 +476,16 @@ impl RuleEngine {
         config: &Config,
         progress: Option<&ScanProgress>,
     ) -> ScanResult {
-        warm_caches_for(&[category]);
-
-        if let Some(p) = progress {
-            p.phase.store(1, Ordering::Relaxed);
-        }
-
         let filtered_rules: Vec<_> = RULES
             .iter()
             .filter(|rule| rule.category() == category)
             .collect();
-
-        if let Some(p) = progress {
-            p.rules_total.store(filtered_rules.len(), Ordering::Relaxed);
-        }
-
-        finalize(run_rules(&filtered_rules, config, progress))
+        Self::scan_rules(
+            &filtered_rules,
+            caches_needed_for(&[category]),
+            config,
+            progress,
+        )
     }
 }
 

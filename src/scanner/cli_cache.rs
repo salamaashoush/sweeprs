@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
 use rustc_hash::FxHashMap;
@@ -16,15 +16,38 @@ pub struct CliResult {
     pub stderr: String,
 }
 
-/// All CLI commands that rules need, prefetched in parallel on first access.
+/// Every CLI command a rule reads, each in its own slot.
 ///
-/// The commands run concurrently via `std::thread::scope`, so total latency
-/// equals max(individual latencies) instead of their sum.
-/// Each command has a 5-second timeout to prevent any single command from
-/// blocking the entire cache.
-pub static CLI_CACHE: LazyLock<FxHashMap<&'static str, CliResult>> = LazyLock::new(prefetch_all);
+/// `prefetch` starts them all at once at the beginning of a scan. A rule that
+/// asks for one waits for that command alone: one slow command (`xcrun simctl`
+/// takes most of a second) holds up only the rules that read it.
+static CLI_CACHE: LazyLock<FxHashMap<&'static str, Slot>> = LazyLock::new(|| {
+    commands()
+        .into_iter()
+        .map(|(key, args)| {
+            (
+                key,
+                Slot {
+                    args,
+                    result: OnceLock::new(),
+                },
+            )
+        })
+        .collect()
+});
 
-fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
+struct Slot {
+    args: &'static [&'static str],
+    result: OnceLock<CliResult>,
+}
+
+impl Slot {
+    fn result(&self) -> &CliResult {
+        self.result.get_or_init(|| run(self.args))
+    }
+}
+
+fn commands() -> Vec<(&'static str, &'static [&'static str])> {
     let mut commands: Vec<(&str, &[&str])> = vec![
         (
             "rustup_active_toolchain",
@@ -36,6 +59,7 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
         ("ruby_version", &["ruby", "--version"]),
         ("java_version", &["java", "--version"]),
         ("docker_system_df", &["docker", "system", "df"]),
+        ("mise_prunable", &["mise", "ls", "--prunable", "--json"]),
     ];
 
     #[cfg(target_os = "macos")]
@@ -61,50 +85,42 @@ fn prefetch_all() -> FxHashMap<&'static str, CliResult> {
         ("uname_r", &["uname", "-r"]),
     ]);
 
-    let commands = commands;
-
-    let mut results = FxHashMap::default();
-
-    std::thread::scope(|s| {
-        let handles: Vec<_> = commands
-            .iter()
-            .map(|&(key, args)| {
-                s.spawn(move || {
-                    let cli_result = match util::run_with_timeout(args, COMMAND_TIMEOUT) {
-                        util::CommandOutcome::Completed(output) => CliResult {
-                            success: output.status.success(),
-                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                        },
-                        util::CommandOutcome::TimedOut | util::CommandOutcome::NotSpawned(_) => {
-                            CliResult {
-                                success: false,
-                                stdout: String::new(),
-                                stderr: String::new(),
-                            }
-                        }
-                    };
-
-                    (key, cli_result)
-                })
-            })
-            .collect();
-
-        for handle in handles {
-            let (key, result) = handle.join().expect("CLI prefetch thread panicked");
-            results.insert(key, result);
-        }
-    });
-
-    results
+    commands
 }
 
-/// Get a prefetched CLI result by key. Returns `None` if the command failed or wasn't found.
+fn run(args: &[&str]) -> CliResult {
+    match util::run_with_timeout(args, COMMAND_TIMEOUT) {
+        util::CommandOutcome::Completed(output) => CliResult {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        },
+        util::CommandOutcome::TimedOut | util::CommandOutcome::NotSpawned(_) => CliResult {
+            success: false,
+            stdout: String::new(),
+            stderr: String::new(),
+        },
+    }
+}
+
+/// Run every command concurrently; returns once all have finished.
+pub fn prefetch() {
+    std::thread::scope(|s| {
+        for slot in CLI_CACHE.values() {
+            s.spawn(|| {
+                slot.result();
+            });
+        }
+    });
+}
+
+/// Get a CLI result by key, running the command if nothing has yet. Returns
+/// `None` if the command failed or the key is unknown.
 pub fn get(key: &str) -> Option<&'static CliResult> {
-    CLI_CACHE.get(key).filter(|r| r.success)
+    get_raw(key).filter(|r| r.success)
 }
 
 /// Get the raw result regardless of success status.
 pub fn get_raw(key: &str) -> Option<&'static CliResult> {
-    CLI_CACHE.get(key)
+    CLI_CACHE.get(key).map(Slot::result)
 }

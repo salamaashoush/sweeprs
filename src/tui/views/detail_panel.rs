@@ -255,7 +255,21 @@ fn entry_detail(tree: &Tree, ci: usize, gi: usize, ei: usize, width: usize) -> V
             plain(output::plural(count, "item", "items")),
         ));
     }
+    if !virtual_entry::is_virtual(&entry.path)
+        && let Ok(modified) = entry.path.symlink_metadata().and_then(|m| m.modified())
+    {
+        let when: chrono::DateTime<chrono::Local> = modified.into();
+        lines.push(fact("Modified", plain(when.format("%Y-%m-%d").to_string())));
+    }
     lines.extend(safety_lines(std::iter::once(entry), width));
+    if let Some(restore) = crate::journal::restore_command(&entry.path) {
+        lines.push(Line::from(""));
+        lines.push(fact("Restore", Span::raw("")));
+        lines.push(Line::from(Span::styled(
+            format!("  {restore}"),
+            Style::default().fg(theme::FG),
+        )));
+    }
     lines.extend(path_lines(entry));
     lines
 }

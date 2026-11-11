@@ -18,6 +18,8 @@ pub fn render(f: &mut Frame, area: Rect) {
         Span::styled(" delete  ", Style::default().fg(theme::DIM)),
         Span::styled("r", Style::default().fg(theme::ACCENT)),
         Span::styled(" rescan  ", Style::default().fg(theme::DIM)),
+        Span::styled("e", Style::default().fg(theme::ACCENT)),
+        Span::styled(" explore  ", Style::default().fg(theme::DIM)),
         Span::styled("o", Style::default().fg(theme::ACCENT)),
         Span::styled(" reveal  ", Style::default().fg(theme::DIM)),
         Span::styled("y", Style::default().fg(theme::ACCENT)),
@@ -31,6 +33,26 @@ pub fn render(f: &mut Frame, area: Rect) {
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
     f.render_widget(paragraph, area);
+}
+
+pub fn render_explore(f: &mut Frame, area: Rect) {
+    let key = |k: &'static str| Span::styled(k, Style::default().fg(theme::ACCENT));
+    let what = |w: &'static str| Span::styled(w, Style::default().fg(theme::DIM));
+    let line = Line::from(vec![
+        key(" j/k"),
+        what(" navigate  "),
+        key("l/enter"),
+        what(" open  "),
+        key("h/backspace"),
+        what(" up  "),
+        key("d"),
+        what(" delete  "),
+        key("r"),
+        what(" remeasure  "),
+        key("e/esc"),
+        what(" back to results"),
+    ]);
+    f.render_widget(Paragraph::new(line), area);
 }
 
 pub fn render_with_filter(f: &mut Frame, area: Rect, query: &str) {

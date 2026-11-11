@@ -1,6 +1,7 @@
 pub mod confirm;
 pub mod deleting;
 pub mod detail_panel;
+pub mod explore_panel;
 pub mod help_bar;
 pub mod status_bar;
 pub mod tree_panel;
@@ -11,4 +12,5 @@ pub enum View {
     Confirm,
     Deleting,
     Search,
+    Explore,
 }

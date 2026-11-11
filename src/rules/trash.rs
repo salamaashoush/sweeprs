@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::rules::CleanupRule;
+use crate::rules::contents::Contents;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
-use crate::scanner::walker;
 
 pub struct TrashRule;
 
@@ -14,32 +14,24 @@ impl CleanupRule for TrashRule {
         Category::Trash
     }
 
+    /// Emptying the Trash removes what is in it. The folder itself carries the
+    /// permissions Finder and the desktop's trash implementation expect.
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-
         let trash_path = if cfg!(target_os = "macos") {
             home.join(".Trash")
         } else {
             home.join(".local/share/Trash")
         };
-
-        if !trash_path.exists() {
-            return Vec::new();
-        }
-
-        let (size, item_count) = walker::dir_size_and_count(&trash_path);
-        if size == 0 {
-            return Vec::new();
-        }
-
-        vec![ScannedEntry {
-            path: trash_path,
-            size,
+        let mut entries = Vec::new();
+        Contents {
             category: Category::Trash,
             safety: SafetyLevel::Danger,
-            description: format!("Trash ({item_count} items)"),
-            item_count: Some(item_count),
-        }]
+            description: "Trash",
+            untouched_since: None,
+        }
+        .push(&mut entries, &trash_path);
+        entries
     }
 }
 

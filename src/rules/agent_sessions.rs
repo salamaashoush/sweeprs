@@ -1088,7 +1088,7 @@ mod tests {
             .arg("-C")
             .arg(dir)
             .args(["-c", "user.name=Salama Ashoush"])
-            .args(["-c", "user.email=salamaashoush@gmail.com"])
+            .args(["-c", "user.email=sashoush@example.com"])
             .args([
                 "-c",
                 "commit.gpgsign=false",

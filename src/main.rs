@@ -2,6 +2,9 @@ mod cleaner;
 mod commands;
 mod config;
 mod filter;
+mod guard;
+mod in_use;
+mod journal;
 mod monitor;
 mod output;
 mod platform;
@@ -91,6 +94,10 @@ enum Command {
         /// List every item instead of the largest per category
         #[arg(short, long)]
         verbose: bool,
+        /// Only what this agent session left behind; `-` reads the session id
+        /// from a `SessionEnd` hook's JSON on stdin
+        #[arg(long, value_name = "ID", conflicts_with = "targets")]
+        session: Option<String>,
     },
     /// Background disk usage monitor
     Monitor {
@@ -164,6 +171,7 @@ enum CategoryArg {
     Ai,
     AgentSessions,
     StaleProject,
+    AgentLeftovers,
 }
 
 impl CategoryArg {
@@ -191,6 +199,7 @@ impl CategoryArg {
             Self::Ai => Category::AiTools,
             Self::AgentSessions => Category::AgentSession,
             Self::StaleProject => Category::StaleProject,
+            Self::AgentLeftovers => Category::AgentLeftovers,
         }
     }
 }
@@ -220,6 +229,7 @@ enum CleanTarget {
     Ai,
     AgentSessions,
     StaleProject,
+    AgentLeftovers,
 }
 
 impl CleanTarget {
@@ -248,6 +258,7 @@ impl CleanTarget {
             Self::Ai => Some(Category::AiTools),
             Self::AgentSessions => Some(Category::AgentSession),
             Self::StaleProject => Some(Category::StaleProject),
+            Self::AgentLeftovers => Some(Category::AgentLeftovers),
         }
     }
 }
@@ -358,8 +369,21 @@ fn main() -> Result<()> {
             archive,
             archive_dir,
             verbose,
+            session,
         }) => {
             let config = config::Config::load()?;
+            let session = match session.as_deref() {
+                Some("-") => {
+                    let mut payload = String::new();
+                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut payload)?;
+                    let id = serde_json::from_str::<serde_json::Value>(&payload)?
+                        .get("session_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    Some(id.ok_or_else(|| anyhow::anyhow!("no session_id in the hook payload"))?)
+                }
+                other => other.map(str::to_owned),
+            };
 
             // Resolve which categories to clean:
             // 1. CLI args override everything
@@ -380,19 +404,28 @@ fn main() -> Result<()> {
                 if cats.is_empty() { None } else { Some(cats) }
             };
 
-            let mut result = match categories {
-                None => scanner::scan_all_with_progress(&config)?,
-                Some(ref cats) if cats.len() == 1 => {
+            let mut result = match (&session, categories) {
+                (Some(id), _) => {
+                    let entries = rules::agent_leftovers::session_leftovers(id);
+                    scanner::entry::ScanResult {
+                        total_size: entries.iter().map(|e| e.size).sum(),
+                        entries,
+                        ..Default::default()
+                    }
+                }
+                (None, None) => scanner::scan_all_with_progress(&config)?,
+                (None, Some(cats)) if cats.len() == 1 => {
                     scanner::scan_category_with_progress(&config, cats[0])?
                 }
-                Some(ref cats) => scanner::scan_categories_with_progress(&config, cats)?,
+                (None, Some(cats)) => scanner::scan_categories_with_progress(&config, &cats)?,
             };
 
             apply_filter(&mut result, &filters, &exclude, min_size, &config)?;
             print_scan_summary(&result);
 
             // Resolve safety level: CLI --all overrides, then config default_clean_safety
-            let include_unsafe = if all {
+            // Naming a session is the explicit request its Caution items need.
+            let include_unsafe = if all || session.is_some() {
                 true
             } else {
                 matches!(
@@ -501,6 +534,7 @@ fn main() -> Result<()> {
                     Category::AiTools => "ai",
                     Category::AgentSession => "agent-sessions",
                     Category::StaleProject => "stale-project",
+                    Category::AgentLeftovers => "agent-leftovers",
                 };
                 println!(
                     "{:<24}{}  {}",

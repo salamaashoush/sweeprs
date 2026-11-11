@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::rules::CleanupRule;
 use crate::scanner::cli_cache;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
+use crate::scanner::project_index;
 use crate::scanner::walker;
 
 pub struct RustToolchainRule;
@@ -248,57 +249,35 @@ impl CleanupRule for MiseToolchainRule {
             return Vec::new();
         }
 
-        // Get currently active versions per tool
-        let active_versions = collect_active_mise_versions();
-
         let mut entries = Vec::new();
 
-        // Each subdir is a tool (node, python, etc.), each subdir of that is a version
-        let Ok(tools) = std::fs::read_dir(&installs_dir) else {
-            return entries;
-        };
+        // Which versions are unused is mise's call: it tracks every config file,
+        // tool stub and running process that pins a version. Without its answer
+        // nothing is offered.
+        let prunable = cli_cache::get("mise_prunable")
+            .map(|r| prunable_mise_installs(&r.stdout, &installs_dir))
+            .unwrap_or_default();
 
-        for tool_entry in tools.flatten() {
-            let tool_path = tool_entry.path();
-            if !tool_path.is_dir() {
+        for (tool_name, ver_name, ver_path) in prunable {
+            // Skip symlinks (mise uses them for aliases like "latest", "lts", etc.)
+            if ver_path.symlink_metadata().is_ok_and(|m| m.is_symlink()) {
                 continue;
             }
-            let tool_name = tool_entry.file_name().to_string_lossy().to_string();
-            let active_for_tool = active_versions.get(&tool_name);
 
-            let Ok(versions) = std::fs::read_dir(&tool_path) else {
+            if !ver_path.is_dir() {
                 continue;
-            };
+            }
 
-            for version_entry in versions.flatten() {
-                let ver_path = version_entry.path();
-                let ver_name = version_entry.file_name().to_string_lossy().to_string();
-
-                // Skip symlinks (mise uses them for aliases like "latest", "lts", etc.)
-                if ver_path.symlink_metadata().is_ok_and(|m| m.is_symlink()) {
-                    continue;
-                }
-
-                if !ver_path.is_dir() {
-                    continue;
-                }
-
-                // Skip if this version is currently active
-                if active_for_tool.is_some_and(|v| v.contains(&ver_name)) {
-                    continue;
-                }
-
-                let size = walker::dir_size(&ver_path);
-                if size > 0 {
-                    entries.push(ScannedEntry {
-                        path: ver_path,
-                        size,
-                        category: Category::Toolchain,
-                        safety: SafetyLevel::Caution,
-                        description: format!("mise {tool_name}: {ver_name}"),
-                        item_count: None,
-                    });
-                }
+            let size = walker::dir_size(&ver_path);
+            if size > 0 {
+                entries.push(ScannedEntry {
+                    path: ver_path,
+                    size,
+                    category: Category::Toolchain,
+                    safety: SafetyLevel::Caution,
+                    description: format!("mise {tool_name}: {ver_name}"),
+                    item_count: None,
+                });
             }
         }
 
@@ -324,28 +303,144 @@ impl CleanupRule for MiseToolchainRule {
     }
 }
 
-/// Collect active mise versions by running `mise current` or reading config files.
-fn collect_active_mise_versions() -> rustc_hash::FxHashMap<String, FxHashSet<String>> {
-    let mut active: rustc_hash::FxHashMap<String, FxHashSet<String>> =
-        rustc_hash::FxHashMap::default();
-
-    // Try `mise current` which outputs: "node  22.21.1  ~/.tool-versions"
-    if let Ok(output) = std::process::Command::new("mise").arg("current").output()
-        && output.status.success()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                active
-                    .entry(parts[0].to_owned())
-                    .or_default()
-                    .insert(parts[1].to_owned());
+/// `(tool, version, install path)` for each version `mise ls --prunable --json` lists.
+///
+/// Paths outside the installs directory are dropped, so a surprise in mise's
+/// output can never point a delete somewhere else.
+fn prunable_mise_installs(json: &str, installs_dir: &Path) -> Vec<(String, String, PathBuf)> {
+    let Ok(serde_json::Value::Object(tools)) = serde_json::from_str(json) else {
+        return Vec::new();
+    };
+    let mut prunable = Vec::new();
+    for (tool, versions) in &tools {
+        for version in versions.as_array().into_iter().flatten() {
+            let (Some(name), Some(path)) = (
+                version.get("version").and_then(serde_json::Value::as_str),
+                version
+                    .get("install_path")
+                    .and_then(serde_json::Value::as_str),
+            ) else {
+                continue;
+            };
+            let path = PathBuf::from(path);
+            if path.starts_with(installs_dir) && path != installs_dir {
+                prunable.push((tool.clone(), name.to_owned(), path));
             }
         }
     }
+    prunable
+}
 
-    active
+/// Installed versions under a version manager that nothing selects any more.
+///
+/// A version is still selected when the manager's global default names it, a
+/// version file in any indexed project names it, or it is the one running now.
+/// A pin such as `20` or `3.12` selects the newest matching install. When a pin
+/// cannot be resolved here (`lts/*`, a named alias), or nothing names any
+/// version at all, nothing is offered: a guess at what is unused is how a
+/// cleaner removes the toolchain a project builds with.
+struct VersionManager<'a> {
+    versions_dir: PathBuf,
+    global_file: PathBuf,
+    project_files: &'a [&'a str],
+    active: Option<String>,
+    label: &'a str,
+}
+
+impl VersionManager<'_> {
+    fn unused_versions(&self) -> Vec<ScannedEntry> {
+        let Ok(read_dir) = std::fs::read_dir(&self.versions_dir) else {
+            return Vec::new();
+        };
+        let installed: Vec<(String, PathBuf)> = read_dir
+            .flatten()
+            .filter(|e| e.path().symlink_metadata().is_ok_and(|m| m.is_dir()))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+            .collect();
+        let names: Vec<&str> = installed.iter().map(|(name, _)| name.as_str()).collect();
+
+        let mut pins = read_pins(&self.global_file);
+        for file in self.project_files {
+            for path in project_index::PROJECT_INDEX.files_named(file) {
+                pins.extend(read_pins(&path));
+            }
+        }
+        pins.extend(self.active.clone());
+
+        let Some(kept) = selected_versions(&names, &pins) else {
+            return Vec::new();
+        };
+        let kept: FxHashSet<String> = kept.into_iter().map(str::to_owned).collect();
+
+        installed
+            .into_iter()
+            .filter(|(name, _)| !kept.contains(name))
+            .filter_map(|(name, path)| {
+                let size = walker::dir_size(&path);
+                (size > 0).then(|| ScannedEntry {
+                    path,
+                    size,
+                    category: Category::Toolchain,
+                    safety: SafetyLevel::Caution,
+                    description: format!("{}: {name}", self.label),
+                    item_count: None,
+                })
+            })
+            .collect()
+    }
+}
+
+fn read_pins(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .map(|line| line.split('#').next().unwrap_or_default().trim())
+                .filter(|pin| !pin.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn bare(version: &str) -> &str {
+    version.trim().trim_start_matches('v')
+}
+
+fn version_key(version: &str) -> Vec<u64> {
+    bare(version)
+        .split(['.', '-'])
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
+}
+
+/// The installed versions `pins` select, or `None` if a pin cannot be resolved.
+fn selected_versions<'a>(installed: &[&'a str], pins: &[String]) -> Option<FxHashSet<&'a str>> {
+    if pins.is_empty() {
+        return None;
+    }
+    let mut kept = FxHashSet::default();
+    for pin in pins {
+        let pin = bare(pin);
+        if pin == "system" {
+            continue;
+        }
+        if let Some(exact) = installed.iter().find(|v| bare(v) == pin) {
+            kept.insert(*exact);
+            continue;
+        }
+        if !pin.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            return None;
+        }
+        let prefix = format!("{pin}.");
+        if let Some(newest) = installed
+            .iter()
+            .filter(|v| bare(v).starts_with(&prefix))
+            .max_by_key(|v| version_key(v))
+        {
+            kept.insert(*newest);
+        }
+    }
+    Some(kept)
 }
 
 pub struct NodeVersionsRule;
@@ -361,43 +456,14 @@ impl CleanupRule for NodeVersionsRule {
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-        let nvm_dir = home.join(".nvm/versions/node");
-
-        if !nvm_dir.exists() {
-            return Vec::new();
+        VersionManager {
+            versions_dir: home.join(".nvm/versions/node"),
+            global_file: home.join(".nvm/alias/default"),
+            project_files: &[".nvmrc", ".node-version"],
+            active: cli_cache::get("node_version").map(|r| r.stdout.trim().to_owned()),
+            label: "Node.js",
         }
-
-        let active_version = cli_cache::get("node_version")
-            .map(|r| r.stdout.trim().to_owned())
-            .unwrap_or_default();
-
-        let mut entries = Vec::new();
-
-        if let Ok(read_dir) = std::fs::read_dir(&nvm_dir) {
-            for entry in read_dir.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy().to_string();
-                let path = entry.path();
-
-                if !path.is_dir() || name_str == active_version {
-                    continue;
-                }
-
-                let size = walker::dir_size(&path);
-                if size > 0 {
-                    entries.push(ScannedEntry {
-                        path,
-                        size,
-                        category: Category::Toolchain,
-                        safety: SafetyLevel::Caution,
-                        description: format!("Node.js: {name_str}"),
-                        item_count: None,
-                    });
-                }
-            }
-        }
-
-        entries
+        .unused_versions()
     }
 }
 
@@ -414,54 +480,16 @@ impl CleanupRule for PythonVersionsRule {
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-        let pyenv_dir = home.join(".pyenv/versions");
-
-        if !pyenv_dir.exists() {
-            return Vec::new();
+        VersionManager {
+            versions_dir: home.join(".pyenv/versions"),
+            global_file: home.join(".pyenv/version"),
+            project_files: &[".python-version"],
+            // "Python 3.x.y"
+            active: cli_cache::get("python3_version")
+                .and_then(|r| r.stdout.split_whitespace().nth(1).map(str::to_owned)),
+            label: "Python",
         }
-
-        let active_version = cli_cache::get("python3_version")
-            .and_then(|r| {
-                // Output is "Python 3.x.y"
-                r.stdout
-                    .split_whitespace()
-                    .nth(1)
-                    .map(|v| v.trim().to_owned())
-            })
-            .unwrap_or_default();
-
-        let mut entries = Vec::new();
-
-        if let Ok(read_dir) = std::fs::read_dir(&pyenv_dir) {
-            for entry in read_dir.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy().to_string();
-                let path = entry.path();
-
-                // Skip symlinks (pyenv uses them for aliases)
-                if path.symlink_metadata().is_ok_and(|m| m.is_symlink()) {
-                    continue;
-                }
-
-                if !path.is_dir() || name_str == active_version {
-                    continue;
-                }
-
-                let size = walker::dir_size(&path);
-                if size > 0 {
-                    entries.push(ScannedEntry {
-                        path,
-                        size,
-                        category: Category::Toolchain,
-                        safety: SafetyLevel::Caution,
-                        description: format!("Python: {name_str}"),
-                        item_count: None,
-                    });
-                }
-            }
-        }
-
-        entries
+        .unused_versions()
     }
 }
 
@@ -478,49 +506,21 @@ impl CleanupRule for RubyVersionsRule {
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
         let home = dirs::home_dir().unwrap_or_default();
-        let rbenv_dir = home.join(".rbenv/versions");
-
-        if !rbenv_dir.exists() {
-            return Vec::new();
+        VersionManager {
+            versions_dir: home.join(".rbenv/versions"),
+            global_file: home.join(".rbenv/version"),
+            project_files: &[".ruby-version"],
+            // "ruby 3.x.yp123 ...", without the patch suffix
+            active: cli_cache::get("ruby_version").and_then(|r| {
+                r.stdout
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.split('p').next())
+                    .map(str::to_owned)
+            }),
+            label: "Ruby",
         }
-
-        let active_version = cli_cache::get("ruby_version")
-            .and_then(|r| {
-                // Output is "ruby 3.x.yp123 ..."
-                r.stdout.split_whitespace().nth(1).map(|v| {
-                    // Strip patch suffix like "p123"
-                    v.split('p').next().unwrap_or(v).trim().to_owned()
-                })
-            })
-            .unwrap_or_default();
-
-        let mut entries = Vec::new();
-
-        if let Ok(read_dir) = std::fs::read_dir(&rbenv_dir) {
-            for entry in read_dir.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy().to_string();
-                let path = entry.path();
-
-                if !path.is_dir() || name_str == active_version {
-                    continue;
-                }
-
-                let size = walker::dir_size(&path);
-                if size > 0 {
-                    entries.push(ScannedEntry {
-                        path,
-                        size,
-                        category: Category::Toolchain,
-                        safety: SafetyLevel::Caution,
-                        description: format!("Ruby: {name_str}"),
-                        item_count: None,
-                    });
-                }
-            }
-        }
-
-        entries
+        .unused_versions()
     }
 }
 
@@ -607,4 +607,94 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(RubyVersionsRule),
         Box::new(JavaVersionsRule),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_versions_mise_calls_prunable_are_offered() {
+        let installs = Path::new("/home/sashoush/.local/share/mise/installs");
+        let json = r#"{
+          "rust": [
+            {"version": "1.99.0", "install_path": "/home/sashoush/.local/share/mise/installs/rust/1.99.0", "active": false}
+          ],
+          "github:acme/tool": [
+            {"version": "0.1.0", "install_path": "/home/sashoush/.local/share/mise/installs/github-acme-tool/0.1.0"}
+          ],
+          "evil": [
+            {"version": "1", "install_path": "/home/sashoush"},
+            {"version": "2", "install_path": "/home/sashoush/.local/share/mise/installs"},
+            {"version": "3"}
+          ]
+        }"#;
+
+        assert_eq!(
+            prunable_mise_installs(json, installs),
+            vec![
+                (
+                    "github:acme/tool".to_owned(),
+                    "0.1.0".to_owned(),
+                    installs.join("github-acme-tool/0.1.0")
+                ),
+                (
+                    "rust".to_owned(),
+                    "1.99.0".to_owned(),
+                    installs.join("rust/1.99.0")
+                ),
+            ]
+        );
+    }
+
+    fn kept(installed: &[&'static str], pins: &[&str]) -> Option<Vec<&'static str>> {
+        let pins: Vec<String> = pins.iter().map(|p| (*p).to_owned()).collect();
+        selected_versions(installed, &pins).map(|kept| {
+            let mut kept: Vec<_> = kept.into_iter().collect();
+            kept.sort_unstable();
+            kept
+        })
+    }
+
+    #[test]
+    fn exact_and_partial_pins_keep_the_versions_they_select() {
+        let installed = ["v18.20.4", "v20.11.0", "v20.18.1", "v22.3.0"];
+        assert_eq!(
+            kept(&installed, &["v18.20.4", "20", "system"]),
+            Some(vec!["v18.20.4", "v20.18.1"])
+        );
+        assert_eq!(
+            kept(&["3.11.9", "3.12.1", "3.12.10"], &["3.12"]),
+            Some(vec!["3.12.10"])
+        );
+        assert_eq!(kept(&["3.11.9"], &["3.13"]), Some(vec![]));
+    }
+
+    #[test]
+    fn nothing_is_offered_without_pins_or_with_an_alias_it_cannot_resolve() {
+        let installed = ["v18.20.4", "v20.18.1"];
+        assert_eq!(kept(&installed, &[]), None);
+        assert_eq!(kept(&installed, &["lts/iron"]), None);
+        assert_eq!(kept(&installed, &["20", "node"]), None);
+    }
+
+    #[test]
+    fn version_files_are_read_line_by_line_without_comments() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join(".python-version");
+        std::fs::write(&file, "3.12.1\n# the old one too\n3.11.9  # legacy\n\n").expect("write");
+        assert_eq!(read_pins(&file), vec!["3.12.1", "3.11.9"]);
+        assert_eq!(read_pins(&tmp.path().join("missing")), Vec::<String>::new());
+    }
+
+    #[test]
+    fn nothing_is_offered_when_mise_gives_no_answer() {
+        let installs = Path::new("/home/sashoush/.local/share/mise/installs");
+        assert_eq!(prunable_mise_installs("", installs), Vec::new());
+        assert_eq!(prunable_mise_installs("{}", installs), Vec::new());
+        assert_eq!(
+            prunable_mise_installs("mise ERROR something", installs),
+            Vec::new()
+        );
+    }
 }

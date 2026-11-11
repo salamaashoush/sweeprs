@@ -9,6 +9,17 @@ pub fn human_size(bytes: u64) -> String {
     format_size(bytes, BINARY)
 }
 
+/// A rough, readable age: `42s`, `5m`, `3h`, `2d`.
+pub fn human_duration(age: Duration) -> String {
+    let secs = age.as_secs();
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    }
+}
+
 /// Replace the home directory prefix with `~` for display.
 pub fn tilde_path(path: &Path) -> String {
     let s = path.display().to_string();

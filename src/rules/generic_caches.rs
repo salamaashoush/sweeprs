@@ -21,6 +21,11 @@ const KNOWN_CACHE_DIRS: &[&str] = &[
     "pre-commit",
     "uv",
     "mise",
+    "zig",
+    "bazelisk",
+    "cabal",
+    "rebar3",
+    "ferridriver",
     "torch",
     "lm-studio",
     "gpt4all",
@@ -103,6 +108,7 @@ const KNOWN_CACHE_DIRS: &[&str] = &[
     "paru",
     "yay",
     "ms-playwright",
+    "puppeteer",
     "electron",
     "nvidia",
     "radv_builtin_shaders",
@@ -122,34 +128,39 @@ impl CleanupRule for GenericCacheDirsRule {
     }
 
     fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
-        let Some(cache_dir) = dirs::cache_dir() else {
-            return Vec::new();
-        };
-        let Ok(read_dir) = std::fs::read_dir(&cache_dir) else {
-            return Vec::new();
-        };
+        let mut roots: Vec<(std::path::PathBuf, SafetyLevel)> = Vec::new();
+        if let Some(cache_dir) = dirs::cache_dir() {
+            roots.push((cache_dir, SafetyLevel::Safe));
+        }
+        // Command-line tools follow XDG on macOS too, so `~/.cache` fills up
+        // beside `~/Library/Caches`. Nothing on macOS promises that what lands
+        // there is disposable, so it is offered with caution.
+        if cfg!(target_os = "macos")
+            && let Some(home) = dirs::home_dir()
+        {
+            roots.push((home.join(".cache"), SafetyLevel::Caution));
+        }
 
         // Sizing these one after another was the slowest single rule on a
         // developer machine: the cache root holds a long tail of directories,
         // several of them gigabytes deep.
-        let candidates: Vec<_> = read_dir
-            .flatten()
-            .filter_map(|entry| {
-                let path = entry.path();
-                if !path.is_dir() {
-                    return None;
-                }
-                let dirname = path.file_name()?.to_string_lossy();
-                if KNOWN_CACHE_DIRS.contains(&dirname.as_ref()) {
-                    return None;
-                }
-                Some(path)
+        let candidates: Vec<_> = roots
+            .iter()
+            .filter_map(|(root, safety)| Some((std::fs::read_dir(root).ok()?, *safety)))
+            .flat_map(|(read_dir, safety)| {
+                read_dir.flatten().map(move |entry| (entry.path(), safety))
+            })
+            .filter(|(path, _)| {
+                path.symlink_metadata().is_ok_and(|m| m.is_dir())
+                    && path.file_name().is_some_and(|name| {
+                        !KNOWN_CACHE_DIRS.contains(&name.to_string_lossy().as_ref())
+                    })
             })
             .collect();
 
         candidates
             .par_iter()
-            .filter_map(|path| {
+            .filter_map(|(path, safety)| {
                 let size = walker::dir_size(path);
                 if size < MIN_CACHE_SIZE {
                     return None;
@@ -158,7 +169,7 @@ impl CleanupRule for GenericCacheDirsRule {
                     path: path.clone(),
                     size,
                     category: Category::AppCache,
-                    safety: SafetyLevel::Safe,
+                    safety: *safety,
                     description: format!(
                         "{} cache",
                         path.file_name().unwrap_or_default().to_string_lossy()

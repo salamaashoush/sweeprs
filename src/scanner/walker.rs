@@ -44,134 +44,32 @@ pub fn file_size(path: &Path) -> u64 {
     path.metadata().map_or(0, |m| m.blocks() * 512)
 }
 
-/// Compute the total size of all files under `path` recursively.
-///
-/// On macOS, uses `getattrlistbulk` to batch file attribute reads (name + type + size)
-/// in a single syscall per directory, eliminating per-file `stat()` overhead.
-/// Falls back to `ignore::WalkBuilder` on other platforms.
+/// What deleting `path` would free, in allocated bytes.
 pub fn dir_size(path: &Path) -> u64 {
     dir_size_and_count(path).0
 }
 
-/// Measure a directory without consulting or updating the scan cache.
+/// Measure a directory without consulting or updating any cache.
 ///
 /// Used after a delete, where the whole point is to see what is left on disk.
 pub fn dir_size_uncached(path: &Path) -> u64 {
-    #[cfg(target_os = "macos")]
-    {
-        super::bulk_stat::dir_size_bulk(path)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        dir_size_fallback(path)
-    }
+    super::tree::measure(path, false).0
 }
 
-/// Compute total recursive size AND top-level item count.
+/// What deleting `path` would free, and how many entries it holds directly.
 ///
-/// Returns `(total_bytes, top_level_count)` where `top_level_count` is the number
-/// of direct children (files and dirs at depth 1).
+/// Within a scan each path is measured once; across scans, unchanged large
+/// directories are read from the listings remembered last time.
 pub fn dir_size_and_count(path: &Path) -> (u64, usize) {
     if let Some(measured) = cached(path) {
         return measured;
     }
-
-    #[cfg(target_os = "macos")]
-    let measured = super::bulk_stat::dir_size_and_count_bulk(path);
-    #[cfg(not(target_os = "macos"))]
-    let measured = dir_size_and_count_fallback(path);
-
+    let measured = super::tree::measure(path, true);
     remember(path, measured);
     measured
 }
 
-/// Fallback implementation using `ignore::WalkBuilder` for non-macOS platforms.
-/// Uses physical size (blocks * 512) and deduplicates hard links by inode.
-#[cfg(not(target_os = "macos"))]
-fn dir_size_fallback(path: &Path) -> u64 {
-    use std::os::unix::fs::MetadataExt;
-
-    let Ok(meta) = path.metadata() else {
-        return 0;
-    };
-
-    if meta.is_file() {
-        return meta.blocks() * 512;
-    }
-
-    let walker = ignore::WalkBuilder::new(path)
-        .hidden(false)
-        .ignore(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false)
-        .same_file_system(true)
-        .build();
-
-    let mut total: u64 = 0;
-    let mut seen_inodes = rustc_hash::FxHashSet::default();
-
-    for entry in walker.flatten() {
-        if entry.file_type().is_some_and(|ft| ft.is_file())
-            && let Ok(meta) = entry.metadata()
-        {
-            let nlink = meta.nlink();
-            if nlink > 1 && !seen_inodes.insert(meta.ino()) {
-                continue;
-            }
-            total += meta.blocks() * 512;
-        }
-    }
-    total
-}
-
-/// Fallback implementation for non-macOS platforms.
-/// Uses physical size (blocks * 512) and deduplicates hard links by inode.
-#[cfg(not(target_os = "macos"))]
-fn dir_size_and_count_fallback(path: &Path) -> (u64, usize) {
-    use std::os::unix::fs::MetadataExt;
-
-    let Ok(meta) = path.metadata() else {
-        return (0, 0);
-    };
-
-    if meta.is_file() {
-        return (meta.blocks() * 512, 1);
-    }
-
-    let walker = ignore::WalkBuilder::new(path)
-        .hidden(false)
-        .ignore(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false)
-        .same_file_system(true)
-        .build();
-
-    let mut total: u64 = 0;
-    let mut count: usize = 0;
-    let mut seen_inodes = rustc_hash::FxHashSet::default();
-
-    for entry in walker.flatten() {
-        let depth = entry.depth();
-        if depth == 0 {
-            continue;
-        }
-        if depth == 1 {
-            count += 1;
-        }
-        if entry.file_type().is_some_and(|ft| ft.is_file())
-            && let Ok(meta) = entry.metadata()
-        {
-            let nlink = meta.nlink();
-            if nlink > 1 && !seen_inodes.insert(meta.ino()) {
-                continue;
-            }
-            total += meta.blocks() * 512;
-        }
-    }
-
-    (total, count)
+/// Keep what this scan listed for the next one.
+pub fn persist_listings() {
+    super::tree::persist();
 }

@@ -31,6 +31,7 @@ const PREFIXES: &[&str] = &[
     "empty-dirs:",
     "editor-history:",
     "agent-worktree:",
+    "held-space:",
 ];
 
 pub fn is_virtual(path: &Path) -> bool {
@@ -91,6 +92,9 @@ pub fn label(path_str: &str) -> String {
             util::tilde_path(&PathBuf::from(root))
         );
     }
+    if let Some(label) = crate::rules::held_space::label(path_str) {
+        return label;
+    }
     if path_str.starts_with("journal:") {
         return "journalctl --vacuum-size=100M".to_owned();
     }
@@ -132,6 +136,9 @@ pub fn clean(path_str: &str, config: &Config, git_gc_timeout: Duration) -> io::R
     }
     if path_str.starts_with("agent-worktree:") {
         return agent_sessions::clean_agent_worktree(path_str);
+    }
+    if path_str.starts_with(crate::rules::held_space::PREFIX) {
+        return crate::rules::held_space::clean(path_str);
     }
     if path_str.starts_with("journal:") {
         return linux_clean(LinuxCleanup::Journal).map(|()| None);

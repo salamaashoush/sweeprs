@@ -59,19 +59,39 @@ fn get_disk_info_inner(full: bool) -> Result<DiskInfo> {
         0.0
     };
 
-    let purgeable_bytes = get_purgeable_bytes(available);
-    let snapshot_bytes = parse_snapshot_bytes();
-
-    // Expensive operations only for full disk info
-    let (icloud_local_bytes, system_app_bytes, other_volumes, tm_reclaimable_bytes) = if full {
+    // The two walks and the two prefetched commands do not depend on each
+    // other; run one after another they cost their sum.
+    let (
+        purgeable_bytes,
+        snapshot_bytes,
+        icloud_local_bytes,
+        system_app_bytes,
+        tm_reclaimable_bytes,
+    ) = std::thread::scope(|s| {
+        let icloud = full.then(|| s.spawn(get_icloud_local_bytes));
+        let apps = full.then(|| s.spawn(get_system_app_bytes));
+        let purgeable = s.spawn(|| get_purgeable_bytes(available));
+        let snapshots = s.spawn(parse_snapshot_bytes);
+        let tm = if full {
+            get_tm_reclaimable_bytes()
+        } else {
+            None
+        };
+        let joined = |handle: Option<std::thread::ScopedJoinHandle<'_, Option<u64>>>| {
+            handle.and_then(|h| h.join().ok().flatten())
+        };
         (
-            get_icloud_local_bytes(),
-            get_system_app_bytes(),
-            get_other_volumes_from(&disks),
-            get_tm_reclaimable_bytes(),
+            purgeable.join().ok().flatten(),
+            snapshots.join().unwrap_or(0),
+            joined(icloud),
+            joined(apps),
+            tm,
         )
+    });
+    let other_volumes = if full {
+        get_other_volumes_from(&disks)
     } else {
-        (None, None, Vec::new(), None)
+        Vec::new()
     };
 
     Ok(DiskInfo {
@@ -202,7 +222,8 @@ fn get_icloud_local_bytes() -> Option<u64> {
 fn get_system_app_bytes() -> Option<u64> {
     let apps_dir = std::path::Path::new("/Applications");
     let apps_size = if apps_dir.exists() {
-        walker::dir_size(apps_dir)
+        let cache = dirs::cache_dir().map(|d| d.join("sweeprs").join("applications-v2.json"));
+        app_bundles::total_size(apps_dir, cache.as_deref())
     } else {
         0
     };
@@ -308,4 +329,129 @@ fn get_other_volumes_from(disks: &Disks) -> Vec<VolumeInfo> {
             }
         })
         .collect()
+}
+
+/// The size of `/Applications`, remembered per bundle between scans.
+///
+/// Walking every bundle is the slowest part of a scan, seconds on a machine
+/// with a few large apps, and only feeds the "system + apps" line. A bundle is
+/// measured again when its own, its `Contents` or its `Info.plist`
+/// modification time moves, which an install or an update does, and every
+/// bundle at least daily for the updaters that patch a bundle in place.
+#[cfg(target_os = "macos")]
+mod app_bundles {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use rayon::prelude::*;
+    use rustc_hash::FxHashMap;
+    use serde::{Deserialize, Serialize};
+
+    use crate::scanner::walker;
+
+    const MAX_AGE: Duration = Duration::from_hours(24);
+
+    #[derive(Serialize, Deserialize, Clone, Copy)]
+    struct Measured {
+        stamp: u64,
+        taken_at: u64,
+        size: u64,
+    }
+
+    fn secs(time: SystemTime) -> u64 {
+        time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    }
+
+    fn stamp(bundle: &Path) -> u64 {
+        [
+            bundle.to_path_buf(),
+            bundle.join("Contents"),
+            bundle.join("Contents/Info.plist"),
+        ]
+        .iter()
+        .filter_map(|p| p.symlink_metadata().and_then(|m| m.modified()).ok())
+        .map(secs)
+        .max()
+        .unwrap_or(0)
+    }
+
+    pub fn total_size(apps_dir: &Path, cache: Option<&Path>) -> u64 {
+        let previous: FxHashMap<PathBuf, Measured> = cache
+            .and_then(|c| std::fs::read_to_string(c).ok())
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        let now = secs(SystemTime::now());
+
+        let Ok(read_dir) = std::fs::read_dir(apps_dir) else {
+            return 0;
+        };
+        let bundles: Vec<PathBuf> = read_dir.flatten().map(|e| e.path()).collect();
+        let current: FxHashMap<PathBuf, Measured> = bundles
+            .into_par_iter()
+            .map(|bundle| {
+                let stamp = stamp(&bundle);
+                let fresh = previous.get(&bundle).copied().filter(|m| {
+                    m.stamp == stamp && now.saturating_sub(m.taken_at) < MAX_AGE.as_secs()
+                });
+                let measured = fresh.unwrap_or_else(|| Measured {
+                    stamp,
+                    taken_at: now,
+                    size: if bundle.is_dir() {
+                        walker::dir_size_uncached(&bundle)
+                    } else {
+                        walker::file_size(&bundle)
+                    },
+                });
+                (bundle, measured)
+            })
+            .collect();
+
+        if let Some(cache) = cache
+            && let Ok(json) = serde_json::to_string(&current)
+        {
+            if let Some(parent) = cache.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(cache, json);
+        }
+        current.values().map(|m| m.size).sum()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn an_unchanged_bundle_is_not_measured_again_and_a_changed_one_is() {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let apps = tmp.path().join("Applications");
+            let cache = tmp.path().join("applications-v2.json");
+            std::fs::create_dir_all(apps.join("Kept.app/Contents")).expect("bundle");
+            std::fs::write(apps.join("Kept.app/Contents/Info.plist"), vec![0u8; 8192])
+                .expect("plist");
+
+            let first = total_size(&apps, Some(&cache));
+            assert!(first > 0);
+
+            // A stale record for an unchanged bundle is trusted until it expires.
+            let mut recorded: FxHashMap<PathBuf, Measured> =
+                serde_json::from_str(&std::fs::read_to_string(&cache).expect("cache"))
+                    .expect("json");
+            for measured in recorded.values_mut() {
+                measured.size = 1;
+            }
+            std::fs::write(&cache, serde_json::to_string(&recorded).expect("json")).expect("write");
+            assert_eq!(total_size(&apps, Some(&cache)), 1);
+
+            // Touching Info.plist, as an update does, measures the bundle again.
+            let later = SystemTime::now() + Duration::from_secs(5);
+            std::fs::File::options()
+                .write(true)
+                .open(apps.join("Kept.app/Contents/Info.plist"))
+                .expect("open")
+                .set_modified(later)
+                .expect("touch");
+            assert_eq!(total_size(&apps, Some(&cache)), first);
+        }
+    }
 }

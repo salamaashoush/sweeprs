@@ -10,6 +10,9 @@ use rayon::prelude::*;
 use yansi::Paint;
 
 use crate::config::Config;
+use crate::guard;
+use crate::in_use;
+use crate::journal;
 use crate::output;
 use crate::rules::simulator;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
@@ -36,20 +39,30 @@ fn remove_dir_robust(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Recursively make a directory tree writable so it can be deleted.
+/// Give the owner write access to every directory in a tree so it can be deleted.
+///
+/// Unlinking needs write permission on the parent directory only, so files are
+/// left alone. Only the owner bit is added: `set_readonly(false)` adds the group
+/// and world write bits too on Unix, and a daemon that finds its socket
+/// directory world-writable refuses to use it.
 fn fix_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
     let walker = ignore::WalkBuilder::new(path)
         .hidden(false)
         .ignore(false)
         .git_ignore(false)
         .build();
     for entry in walker.flatten() {
+        if !entry.file_type().is_some_and(|t| t.is_dir()) {
+            continue;
+        }
         let p = entry.path();
-        if let Ok(meta) = p.metadata() {
-            let mut perms = meta.permissions();
-            #[allow(clippy::permissions_set_readonly_false)]
-            perms.set_readonly(false);
-            let _ = std::fs::set_permissions(p, perms);
+        if let Ok(meta) = p.symlink_metadata() {
+            let mode = meta.permissions().mode();
+            if mode & 0o200 == 0 {
+                let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode | 0o200));
+            }
         }
     }
 }
@@ -296,8 +309,40 @@ fn interactive_confirm(category_groups: &[(Category, Vec<&ScannedEntry>)]) -> Re
     Ok(choice)
 }
 
+/// Local Time Machine snapshots of the root volume.
+///
+/// A snapshot keeps every block that existed when it was taken, so what a
+/// clean deletes stays allocated until each snapshot that saw it expires.
+fn local_snapshot_count() -> usize {
+    if !cfg!(target_os = "macos") {
+        return 0;
+    }
+    crate::scanner::cli_cache::get("tmutil_snapshots").map_or(0, |r| {
+        r.stdout
+            .lines()
+            .filter(|l| l.contains("com.apple."))
+            .count()
+    })
+}
+
 /// Check if a filesystem path requires root privileges to modify.
+///
+/// For a path that exists the filesystem answers: removing it takes owning it
+/// and being able to write to its parent. A name such as `/private/var/` says
+/// nothing on its own, since every user's temp directory lives under it.
 pub fn needs_root(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    if let Ok(meta) = path.symlink_metadata() {
+        let uid = nix::unistd::getuid().as_raw();
+        if uid == 0 {
+            return false;
+        }
+        let parent_writable = path.parent().is_some_and(|parent| {
+            nix::unistd::access(parent, nix::unistd::AccessFlags::W_OK).is_ok()
+        });
+        return meta.uid() != uid || !parent_writable;
+    }
     let path_str = path.display().to_string();
     // System directories that require elevated permissions
     path_str.starts_with("/Library/")
@@ -326,6 +371,14 @@ fn delete_entries(
     let mut slow_entries: Vec<&ScannedEntry> = Vec::new();
     let mut skipped_entries: Vec<(&ScannedEntry, &str)> = Vec::new();
 
+    let open_files = in_use::OpenFiles::snapshot();
+    if open_files.is_none() {
+        println!(
+            "{}",
+            "Could not list open files; items in use will not be skipped.".yellow()
+        );
+    }
+
     for entry in entries {
         if virtual_entry::is_virtual(&entry.path) {
             // These stand for a command, not a directory: there is nothing to
@@ -338,6 +391,11 @@ fn delete_entries(
             }
         } else if needs_root(&entry.path) {
             skipped_entries.push((entry, "requires sudo"));
+        } else if open_files
+            .as_ref()
+            .is_some_and(|open| open.held_under(&entry.path).is_some())
+        {
+            skipped_entries.push((entry, "in use by a running process"));
         } else {
             fast_entries.push(entry);
         }
@@ -400,6 +458,7 @@ fn delete_entries(
             let freed = measure_freed(entry, &result);
             match result {
                 Ok(()) => {
+                    journal::record(entry, freed);
                     let total = cleaned.fetch_add(freed, Ordering::Relaxed) + freed;
                     bar.set_message(format!(
                         "{} / {}",
@@ -409,6 +468,7 @@ fn delete_entries(
                 }
                 Err(e) => {
                     if freed > 0 {
+                        journal::record(entry, freed);
                         cleaned.fetch_add(freed, Ordering::Relaxed);
                     }
                     errors.lock().unwrap().push((entry.path.clone(), e));
@@ -435,6 +495,29 @@ fn delete_entries(
         output::plural(succeeded, "item", "items"),
         format!("· {:.1}s", started.elapsed().as_secs_f64()).dim(),
     );
+    if !archive && cleaned > 0 {
+        let snapshots = local_snapshot_count();
+        if snapshots > 0 {
+            println!(
+                "  {}",
+                format!(
+                    "{} kept by {} local Time Machine snapshot{}: free space rises as {} expire{}.",
+                    util::human_size(cleaned),
+                    snapshots,
+                    if snapshots == 1 { "" } else { "s" },
+                    if snapshots == 1 { "it" } else { "they" },
+                    if snapshots == 1 { "s" } else { "" },
+                )
+                .yellow()
+            );
+        }
+    }
+    if let Some(log) = journal::path() {
+        println!(
+            "  {}",
+            format!("Recorded in {}", util::tilde_path(&log)).dim()
+        );
+    }
 
     if !skipped_entries.is_empty() {
         let skipped_size: u64 = skipped_entries.iter().map(|(e, _)| e.size).sum();
@@ -478,6 +561,7 @@ fn delete_entries(
 /// enumerates it from; removing only the payload leaves a device that lists but
 /// cannot launch.
 pub fn delete_path(path: &Path) -> io::Result<()> {
+    guard::check(path)?;
     if path.is_dir() {
         remove_dir_robust(path)?;
         if simulator::is_avd_payload(path) {
@@ -522,6 +606,7 @@ fn run_slow_operations(entries: &[&ScannedEntry], cleaned: &AtomicU64, config: &
         match result {
             Ok(freed) => {
                 let freed = freed.unwrap_or(entry.size);
+                journal::record(entry, freed);
                 cleaned.fetch_add(freed, Ordering::Relaxed);
                 println!(
                     "  {} {display}  {}",
@@ -564,6 +649,7 @@ pub fn measure_freed(entry: &ScannedEntry, result: &Result<(), io::Error>) -> u6
 /// Compress a directory into a .tar.zst (or .tar.gz fallback) archive, then remove the original.
 /// If `archive_dir` is Some, the archive is placed there; otherwise next to the original.
 fn archive_directory(dir: &Path, archive_dir: Option<&Path>) -> io::Result<()> {
+    guard::check(dir)?;
     let dir_name = dir
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no directory name"))?
@@ -744,6 +830,61 @@ mod tests {
         assert!(!dir.join("Pixel_7.ini").exists());
         assert!(dir.join("Keep_Me.avd").exists());
         assert!(dir.join("Keep_Me.ini").exists());
+    }
+
+    #[test]
+    fn your_own_temp_files_need_no_root_and_system_files_do() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mine = tmp
+            .path()
+            .canonicalize()
+            .expect("canonical")
+            .join("leftover");
+        std::fs::write(&mine, b"x").expect("file");
+        assert!(mine.starts_with("/private/var") || !cfg!(target_os = "macos"));
+        assert!(!needs_root(&mine));
+        assert!(needs_root(Path::new("/usr/bin")));
+        assert!(needs_root(Path::new("/Library/Logs/acme-not-there")));
+    }
+
+    #[test]
+    fn a_read_only_tree_is_still_deleted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let target = tmp.path().join("gomod");
+        std::fs::create_dir_all(target.join("pkg")).expect("tree");
+        std::fs::write(target.join("pkg/mod.go"), b"x").expect("file");
+        std::fs::set_permissions(target.join("pkg"), std::fs::Permissions::from_mode(0o555))
+            .expect("chmod");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+
+        delete_path(&target).expect("delete");
+
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn fixing_permissions_adds_only_the_owner_write_bit_to_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(root.join("ipc")).expect("tree");
+        std::fs::write(root.join("ipc/lock"), b"1").expect("file");
+        std::fs::set_permissions(
+            root.join("ipc/lock"),
+            std::fs::Permissions::from_mode(0o400),
+        )
+        .expect("chmod");
+        std::fs::set_permissions(root.join("ipc"), std::fs::Permissions::from_mode(0o500))
+            .expect("chmod");
+
+        fix_permissions(&root);
+
+        let mode = |p: &Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode(&root.join("ipc")), 0o700);
+        assert_eq!(mode(&root.join("ipc/lock")), 0o400);
     }
 
     #[test]

@@ -10,12 +10,15 @@ use crate::scanner;
 use crate::scanner::ScanUpdate;
 use crate::scanner::entry::{ScanResult, ScannedEntry};
 use crate::tui::deletion::DeletionJob;
+use crate::tui::explore::Explorer;
 use crate::tui::tree::{RowRef, Tree};
 use crate::tui::views::View;
 use crate::virtual_entry;
 
-/// Maximum age of a cached scan result before it's ignored (2 hours).
-const SCAN_CACHE_TTL_SECS: u64 = 7200;
+/// A cached scan older than this is not shown at startup. Anything younger is
+/// shown at once and replaced by the rescan that starts with the app, so it
+/// only has to be better than an empty screen.
+const SCAN_CACHE_TTL_SECS: u64 = 7 * 24 * 3600;
 
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
@@ -44,6 +47,10 @@ pub struct App {
     pub search_active: bool,
     /// Set to true when anything changes that requires a redraw.
     pub needs_redraw: bool,
+    /// The directory browser, while it is open.
+    pub explorer: Option<Explorer>,
+    /// When the results on screen were scanned, if they came from the cache.
+    pub cached_at: Option<SystemTime>,
 }
 
 impl App {
@@ -57,7 +64,8 @@ impl App {
         // Try to load a cached scan result for instant startup
         let cached = scan_cache.as_deref().and_then(Self::load_scan_cache);
         let has_cache = cached.is_some();
-        let result = cached.unwrap_or_default();
+        let cached_at = cached.as_ref().map(|(_, at)| *at);
+        let result = cached.map(|(result, _)| result).unwrap_or_default();
         let tree = Tree::from_scan_result(&result);
 
         Self {
@@ -85,6 +93,8 @@ impl App {
             search_query: String::new(),
             search_active: false,
             needs_redraw: true,
+            explorer: None,
+            cached_at,
         }
     }
 
@@ -158,6 +168,7 @@ impl App {
         }
 
         if finished {
+            self.cached_at = None;
             self.scanning = false;
             self.scan_receiver = None;
             // Save scan result for instant startup next time
@@ -233,6 +244,75 @@ impl App {
             View::Confirm => self.handle_confirm_key(key),
             View::Deleting => self.handle_deleting_key(key),
             View::Search => self.handle_search_key(key),
+            View::Explore => self.handle_explore_key(key),
+        }
+    }
+
+    /// Open the explorer on what the cursor points at: the entry's directory,
+    /// or home for a category, a group or a command entry.
+    fn open_explorer(&mut self) {
+        let visible = self.tree.visible_rows();
+        let entry_path = match visible.get(self.cursor) {
+            Some(&RowRef::Entry(ci, gi, ei)) => {
+                Some(self.tree.categories[ci].groups[gi].entries[ei].path.clone())
+            }
+            _ => None,
+        };
+        let dir = entry_path
+            .filter(|p| !virtual_entry::is_virtual(p))
+            .and_then(|p| {
+                if p.is_dir() {
+                    Some(p)
+                } else {
+                    p.parent().map(std::path::Path::to_path_buf)
+                }
+            })
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| std::path::PathBuf::from("/"));
+        self.explorer = Some(Explorer::open(dir));
+        self.view = View::Explore;
+    }
+
+    fn handle_explore_key(&mut self, key: KeyEvent) {
+        let Some(explorer) = self.explorer.as_mut() else {
+            self.view = View::Main;
+            return;
+        };
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => explorer.down(),
+            KeyCode::Char('k') | KeyCode::Up => explorer.up(),
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => explorer.enter(),
+            KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => explorer.leave(),
+            KeyCode::Char('r') => explorer.refresh(),
+            KeyCode::Char('d') => {
+                if let Some(entry) = explorer.deletion_entry() {
+                    self.selected_for_deletion = vec![entry];
+                    self.view = View::Confirm;
+                }
+            }
+            KeyCode::Char('e' | 'q') | KeyCode::Esc => {
+                self.explorer = None;
+                self.view = View::Main;
+            }
+            _ => {}
+        }
+    }
+
+    /// Pick up sizes the explorer measured since the last frame.
+    pub fn check_explorer(&mut self) {
+        if let Some(explorer) = self.explorer.as_mut()
+            && explorer.poll()
+        {
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Where a confirm or a finished deletion returns to.
+    fn home_view(&self) -> View {
+        if self.explorer.is_some() {
+            View::Explore
+        } else {
+            View::Main
         }
     }
 
@@ -388,6 +468,7 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('e') => self.open_explorer(),
             KeyCode::Char('/') => {
                 self.view = View::Search;
                 self.search_query.clear();
@@ -405,7 +486,7 @@ impl App {
                 self.view = View::Deleting;
             }
             KeyCode::Char('n') | KeyCode::Esc => {
-                self.view = View::Main;
+                self.view = self.home_view();
             }
             _ => {}
         }
@@ -485,7 +566,10 @@ impl App {
         self.result.total_size = self.result.entries.iter().map(|e| e.size).sum();
         self.save_scan_cache();
         self.rebuild_tree();
-        self.view = View::Main;
+        if let Some(explorer) = self.explorer.as_mut() {
+            explorer.refresh();
+        }
+        self.view = self.home_view();
     }
 
     fn scan_cache_path() -> std::path::PathBuf {
@@ -495,18 +579,21 @@ impl App {
             .join("last_scan.json")
     }
 
-    fn load_scan_cache(path: &std::path::Path) -> Option<ScanResult> {
+    /// The last scan and when it was taken, without what has since gone.
+    fn load_scan_cache(path: &std::path::Path) -> Option<(ScanResult, SystemTime)> {
         let data = std::fs::read_to_string(path).ok()?;
-
-        // Check file modification time for TTL
-        let metadata = std::fs::metadata(path).ok()?;
-        let modified = metadata.modified().ok()?;
+        let modified = std::fs::metadata(path).ok()?.modified().ok()?;
         let age = SystemTime::now().duration_since(modified).ok()?;
         if age.as_secs() > SCAN_CACHE_TTL_SECS {
             return None;
         }
 
-        serde_json::from_str(&data).ok()
+        let mut result: ScanResult = serde_json::from_str(&data).ok()?;
+        result
+            .entries
+            .retain(|e| virtual_entry::is_virtual(&e.path) || e.path.symlink_metadata().is_ok());
+        result.total_size = result.entries.iter().map(|e| e.size).sum();
+        Some((result, modified))
     }
 
     fn save_scan_cache(&self) {
@@ -524,6 +611,78 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+
+    fn frame_text(app: &mut App) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(110, 16)).expect("terminal");
+        let total = app.tree.total_reclaimable();
+        terminal
+            .draw(|f| crate::tui::draw(f, app, total))
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn explore_lists_a_directory_by_size_and_says_what_no_rule_covers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().canonicalize().expect("canonical");
+        std::fs::create_dir(root.join("models")).expect("dir");
+        std::fs::write(root.join("models/weights.bin"), vec![3u8; 512 * 1024]).expect("file");
+        std::fs::write(root.join("notes.txt"), b"hello").expect("file");
+
+        let mut app = App::with_scan_cache(Config::default(), None);
+        app.explorer = Some(Explorer::open(root.clone()));
+        app.view = View::Explore;
+        while app.explorer.as_ref().is_some_and(Explorer::measuring) {
+            app.check_explorer();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.check_explorer();
+
+        let frame = frame_text(&mut app);
+        println!("{frame}");
+        let models = frame.find("models/").expect("models listed");
+        let notes = frame.find("notes.txt").expect("notes listed");
+        assert!(models < notes, "largest first");
+        assert!(frame.contains("No rule offers this"));
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(app.view, View::Confirm);
+        assert_eq!(app.selected_for_deletion[0].path, root.join("models"));
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.view, View::Explore);
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(app.view, View::Deleting);
+        while app.deletion.as_ref().is_some_and(|job| !job.is_finished()) {
+            app.check_deletion();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.check_deletion();
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.view, View::Explore);
+        assert!(!root.join("models").exists());
+        let names: Vec<_> = app
+            .explorer
+            .as_ref()
+            .map(|e| e.children.iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(names, ["notes.txt"]);
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        assert_eq!(app.view, View::Main);
+        assert!(app.explorer.is_none());
+    }
+
     use super::*;
     use crate::scanner::entry::Category;
     use crate::tui::tree::RowKey;

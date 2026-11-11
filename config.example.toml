@@ -144,6 +144,9 @@ ai_tools = true
 # Danger, so `sweeprs clean` never touches it without an explicit request.
 agent_session = true
 stale_project = true
+# Directories coding agents created in cache and temp locations, found from
+# their session transcripts.
+agent_leftovers = true
 
 [monitor]
 # How often the background monitor checks disk usage (seconds)

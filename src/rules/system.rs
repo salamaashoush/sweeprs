@@ -3,7 +3,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::config::Config;
 use crate::rules::CleanupRule;
+use crate::rules::contents::Contents;
 use crate::scanner::entry::{Category, SafetyLevel, ScannedEntry};
+#[cfg(target_os = "macos")]
 use crate::scanner::walker;
 
 #[cfg(target_os = "macos")]
@@ -70,17 +72,7 @@ impl CleanupRule for SystemTempRule {
         if let Ok(tmpdir) = std::env::var("TMPDIR") {
             let tmpdir_path = PathBuf::from(&tmpdir);
             if tmpdir_path.exists() {
-                let size = scan_old_files(&tmpdir_path, one_hour_ago);
-                if size > 0 {
-                    entries.push(ScannedEntry {
-                        path: tmpdir_path,
-                        size,
-                        category: Category::SystemJunk,
-                        safety: SafetyLevel::Caution,
-                        description: "User temp files".to_owned(),
-                        item_count: None,
-                    });
-                }
+                temp_contents("User temp files", one_hour_ago).push(&mut entries, &tmpdir_path);
             }
         }
 
@@ -91,6 +83,15 @@ impl CleanupRule for SystemTempRule {
         }
 
         entries
+    }
+}
+
+fn temp_contents(description: &str, one_hour_ago: SystemTime) -> Contents<'_> {
+    Contents {
+        category: Category::SystemJunk,
+        safety: SafetyLevel::Caution,
+        description,
+        untouched_since: Some(one_hour_ago),
     }
 }
 
@@ -106,18 +107,9 @@ fn scan_macos_temp(entries: &mut Vec<ScannedEntry>, one_hour_ago: SystemTime) {
             .and_then(|t| PathBuf::from(&t).canonicalize().ok())
             .is_some_and(|c| c == private_tmp_canonical);
 
-        if !already_scanned && std::fs::read_dir(&private_tmp).is_ok() {
-            let size = scan_old_files(&private_tmp, one_hour_ago);
-            if size > 0 {
-                entries.push(ScannedEntry {
-                    path: private_tmp,
-                    size,
-                    category: Category::SystemJunk,
-                    safety: SafetyLevel::Caution,
-                    description: "System temp files (/private/tmp)".to_owned(),
-                    item_count: None,
-                });
-            }
+        if !already_scanned {
+            temp_contents("System temp files (/private/tmp)", one_hour_ago)
+                .push(entries, &private_tmp);
         }
     }
 
@@ -143,18 +135,9 @@ fn scan_macos_temp(entries: &mut Vec<ScannedEntry>, one_hour_ago: SystemTime) {
                             continue;
                         }
                     }
-                    if t_dir.exists() && t_dir.is_dir() && std::fs::read_dir(&t_dir).is_ok() {
-                        let size = scan_old_files(&t_dir, one_hour_ago);
-                        if size > 0 {
-                            entries.push(ScannedEntry {
-                                path: t_dir,
-                                size,
-                                category: Category::SystemJunk,
-                                safety: SafetyLevel::Caution,
-                                description: "Temp files in /var/folders".to_owned(),
-                                item_count: None,
-                            });
-                        }
+                    if t_dir.exists() && t_dir.is_dir() {
+                        temp_contents("Temp files in /var/folders", one_hour_ago)
+                            .push(entries, &t_dir);
                     }
                 }
             }
@@ -172,56 +155,16 @@ fn scan_linux_temp(entries: &mut Vec<ScannedEntry>, one_hour_ago: SystemTime) {
             .and_then(|t| PathBuf::from(&t).canonicalize().ok())
             .is_some_and(|c| c == tmp_canonical);
 
-        if !already_scanned && std::fs::read_dir(&tmp).is_ok() {
-            let size = scan_old_files(&tmp, one_hour_ago);
-            if size > 0 {
-                entries.push(ScannedEntry {
-                    path: tmp,
-                    size,
-                    category: Category::SystemJunk,
-                    safety: SafetyLevel::Caution,
-                    description: "System temp files (/tmp)".to_owned(),
-                    item_count: None,
-                });
-            }
+        if !already_scanned {
+            temp_contents("System temp files (/tmp)", one_hour_ago).push(entries, &tmp);
         }
     }
 
     // /var/tmp - persistent temp (survives reboots)
     let var_tmp = PathBuf::from("/var/tmp");
-    if var_tmp.exists() && var_tmp.is_dir() && std::fs::read_dir(&var_tmp).is_ok() {
-        let size = scan_old_files(&var_tmp, one_hour_ago);
-        if size > 0 {
-            entries.push(ScannedEntry {
-                path: var_tmp,
-                size,
-                category: Category::SystemJunk,
-                safety: SafetyLevel::Caution,
-                description: "Persistent temp files (/var/tmp)".to_owned(),
-                item_count: None,
-            });
-        }
+    if var_tmp.exists() && var_tmp.is_dir() {
+        temp_contents("Persistent temp files (/var/tmp)", one_hour_ago).push(entries, &var_tmp);
     }
-}
-
-fn scan_old_files(dir: &std::path::Path, older_than: SystemTime) -> u64 {
-    let mut total = 0u64;
-    if let Ok(read_dir) = std::fs::read_dir(dir) {
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if let Ok(meta) = path.symlink_metadata() {
-                let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                if modified < older_than {
-                    if meta.is_dir() {
-                        total += walker::dir_size(&path);
-                    } else {
-                        total += meta.len();
-                    }
-                }
-            }
-        }
-    }
-    total
 }
 
 #[cfg(target_os = "macos")]

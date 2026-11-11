@@ -250,7 +250,7 @@ impl ColimaRule {
     }
 
     /// Scan shared disk storage under `~/.colima/_lima/_disks/`.
-    /// Layout: _disks/<instance-name>/datadisk
+    /// Layout: `_disks/<instance-name>/datadisk`
     ///
     /// Each instance gets a `datadisk` file here (typically 60GB virtual, 1-10GB actual).
     /// When Colima instances are deleted, these datadisks can be left behind as orphans.
@@ -337,7 +337,7 @@ fn shallow_dir_size(dir: &Path, exclude: &[&str]) -> u64 {
     total
 }
 
-/// Sum actual disk usage of disk image files in a Colima _disks/<instance>/ directory.
+/// Sum actual disk usage of disk image files in a Colima `_disks/<instance>/` directory.
 /// Handles both old format (diffdisk/basedisk) and new format (datadisk).
 /// Uses block-based sizing for sparse files.
 fn disk_dir_size(dir: &Path) -> u64 {

@@ -1,6 +1,7 @@
 pub mod app;
 pub mod deletion;
 pub mod event;
+pub mod explore;
 pub mod theme;
 pub mod tree;
 pub mod views;
@@ -42,10 +43,18 @@ pub fn run() -> Result<()> {
     while app.running {
         app.check_scan();
         app.check_deletion();
+        app.check_explorer();
 
         // Only redraw when state has changed (input, scan updates, etc.)
         // Always redraw while scanning since the progress text changes.
-        if app.needs_redraw || app.scanning || app.deleting() {
+        if app.needs_redraw
+            || app.scanning
+            || app.deleting()
+            || app
+                .explorer
+                .as_ref()
+                .is_some_and(explore::Explorer::measuring)
+        {
             app.needs_redraw = false;
 
             // Pre-compute values that need &mut self before entering the draw closure.
@@ -107,8 +116,15 @@ pub fn draw(f: &mut ratatui::Frame, app: &mut App, total_reclaimable: u64) {
     let content = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
         .split(chunks[1]);
 
-    views::tree_panel::render(f, content[0], app);
-    views::detail_panel::render(f, content[1], app);
+    if app.view == View::Explore
+        || (app.explorer.is_some() && matches!(app.view, View::Confirm | View::Deleting))
+    {
+        views::explore_panel::render(f, content[0], app);
+        views::explore_panel::render_detail(f, content[1], app);
+    } else {
+        views::tree_panel::render(f, content[0], app);
+        views::detail_panel::render(f, content[1], app);
+    }
 
     // Status bar
     views::status_bar::render(f, chunks[2], app);
@@ -119,6 +135,8 @@ pub fn draw(f: &mut ratatui::Frame, app: &mut App, total_reclaimable: u64) {
         let search_bar =
             ratatui::widgets::Paragraph::new(search_text).style(Style::default().fg(theme::ACCENT));
         f.render_widget(search_bar, chunks[3]);
+    } else if app.explorer.is_some() {
+        views::help_bar::render_explore(f, chunks[3]);
     } else if app.search_active && !app.search_query.is_empty() {
         views::help_bar::render_with_filter(f, chunks[3], &app.search_query);
     } else {

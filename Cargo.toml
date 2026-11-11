@@ -33,7 +33,7 @@ tempfile = "3"
 unicode-width = "0.2"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", default-features = false, features = ["signal"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "signal", "user"] }
 
 [lints.rust]
 unsafe_code = "deny"

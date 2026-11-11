@@ -283,6 +283,42 @@ sweeprs config --path
 
 **Search mode** (`/`): Type to filter entries by name. Press `Enter` to apply the filter, `Esc` to cancel. While a search filter is active, only matching entries are shown in the tree.
 
+### Agent leftovers
+
+Agents build into `~/.cache/<name>-target`, clone reference repositories into
+`/tmp` and write scratch trees into `$TMPDIR`, and nothing but the session's
+transcript records whose they were. sweeprs reads Claude Code transcripts for
+the commands that create paths (`mkdir`, `git clone`, `git worktree add`,
+`--target-dir`, `CARGO_TARGET_DIR=`, copy and redirect targets) and the files
+the agent wrote, and lists a directory as `Left by "<session title>" (<date>)`
+only when:
+
+- it sits directly in `~/.cache`, `$TMPDIR`, `/tmp` or `/var/tmp`;
+- it was born after the command that names it, so a cache the agent merely
+  wrote into is not claimed;
+- the session has been quiet for an hour and nothing inside changed in that
+  hour;
+- it holds no socket or FIFO and you own all of it.
+
+Parsed transcripts are cached by size and modification time, so only a running
+session's transcript is read again.
+
+To clean up as each session ends, add a `SessionEnd` hook to
+`~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "sweeprs clean --session - --force --yes" }] }
+    ]
+  }
+}
+```
+
+`sweeprs clean --session <id>` lists one session's leftovers without deleting
+anything.
+
 ## Categories
 
 | Category | CLI Arg | Safety | What it finds |
@@ -305,6 +341,7 @@ sweeprs config --path
 | Simulators | `simulator` | Caution | iOS simulator runtimes and devices, Android AVDs and system images |
 | AI Tools | `ai` | Caution | Superseded Claude Code versions, Claude Desktop VM, Claude/Cursor/Codex/Copilot caches and downloaded extensions |
 | AI Agent Sessions | `agent-sessions` | Danger | Transcripts, chat threads, rewind checkpoints, scratchpads and clean pushed worktrees from Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI, Zed, opencode and other agents -- only once idle past the configured age |
+| Agent Leftovers | `agent-leftovers` | Caution | Directories agent sessions created in `~/.cache`, `$TMPDIR` and `/tmp`, attributed to the session from its transcript |
 | Trash | `trash` | Danger | Trash contents (~/.Trash on macOS, ~/.local/share/Trash on Linux) |
 | Large Files | `large-files` | Danger | Files over 500 MB (configurable) |
 | Duplicates | `duplicates` | Danger | Identical files by content hash (disabled by default) |
@@ -568,6 +605,7 @@ Use these names with `sweeprs scan --category` or `sweeprs clean`:
 | `llm` | LLM Models |
 | `simulator` | Simulators |
 | `ai` | AI Tools |
+| `agent-leftovers` | Agent Leftovers |
 
 ## Architecture
 

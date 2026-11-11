@@ -307,6 +307,15 @@ impl ProjectIndex {
         found
     }
 
+    /// Every file called `name` directly inside an indexed directory.
+    pub fn files_named(&self, name: &str) -> Vec<PathBuf> {
+        self.dirs
+            .par_iter()
+            .map(|d| d.path.join(name))
+            .filter(|path| path.is_file())
+            .collect()
+    }
+
     /// Find all directories with a given name.
     pub fn find_dirs_by_name(&self, name: &str) -> Vec<PathBuf> {
         self.dirs

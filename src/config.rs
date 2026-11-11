@@ -138,6 +138,8 @@ pub struct EnabledCategories {
     pub agent_session: bool,
     #[serde(alias = "staleProject")]
     pub stale_project: bool,
+    #[serde(alias = "agentLeftovers")]
+    pub agent_leftovers: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,6 +260,7 @@ impl Default for EnabledCategories {
             ai_tools: true,
             agent_session: true,
             stale_project: true,
+            agent_leftovers: true,
         }
     }
 }
@@ -363,6 +366,7 @@ impl Config {
             Category::AiTools => self.categories.enabled.ai_tools,
             Category::AgentSession => self.categories.enabled.agent_session,
             Category::StaleProject => self.categories.enabled.stale_project,
+            Category::AgentLeftovers => self.categories.enabled.agent_leftovers,
         }
     }
 
@@ -392,6 +396,7 @@ impl Config {
             "ai" | "ai-tools" => Some(Category::AiTools),
             "agent-sessions" | "agent-session" | "sessions" => Some(Category::AgentSession),
             "stale-project" | "stale-projects" => Some(Category::StaleProject),
+            "agent-leftovers" | "leftovers" => Some(Category::AgentLeftovers),
             _ => None,
         }
     }

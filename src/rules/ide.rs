@@ -140,7 +140,79 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(OrphanedWorkspaceStorageRule),
         Box::new(EditorStateBackupRule),
         Box::new(EditorLocalHistoryRule),
+        Box::new(ObsoleteExtensionsRule),
     ]
+}
+
+/// Extension folders of VS Code and its forks.
+const EXTENSION_DIRS: &[&str] = &[
+    ".vscode/extensions",
+    ".vscode-insiders/extensions",
+    ".vscode-oss/extensions",
+    ".cursor/extensions",
+    ".windsurf/extensions",
+    ".antigravity/extensions",
+    ".kiro/extensions",
+    ".trae/extensions",
+];
+
+/// Extension versions the editor has already replaced.
+///
+/// An update installs the new version beside the old one and lists the old
+/// folder in `extensions/.obsolete`; the editor deletes those folders on a
+/// later launch, so until then they are dead weight it has itself disowned.
+pub struct ObsoleteExtensionsRule;
+
+impl CleanupRule for ObsoleteExtensionsRule {
+    fn name(&self) -> &'static str {
+        "Obsolete editor extensions"
+    }
+
+    fn category(&self) -> Category {
+        Category::IdeCache
+    }
+
+    fn scan(&self, _config: &Config) -> Vec<ScannedEntry> {
+        let home = dirs::home_dir().unwrap_or_default();
+        EXTENSION_DIRS
+            .iter()
+            .flat_map(|dir| obsolete_extensions(&home.join(dir)))
+            .filter_map(|path| {
+                let size = walker::dir_size(&path);
+                let name = path.file_name()?.to_string_lossy().into_owned();
+                (size > 0).then(|| ScannedEntry {
+                    path,
+                    size,
+                    category: Category::IdeCache,
+                    safety: SafetyLevel::Safe,
+                    description: format!("Replaced extension: {name}"),
+                    item_count: None,
+                })
+            })
+            .collect()
+    }
+}
+
+fn obsolete_extensions(extensions_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(json) = std::fs::read_to_string(extensions_dir.join(".obsolete")) else {
+        return Vec::new();
+    };
+    let Ok(serde_json::Value::Object(listed)) = serde_json::from_str(&json) else {
+        return Vec::new();
+    };
+    listed
+        .iter()
+        .filter(|(_, obsolete)| obsolete.as_bool() == Some(true))
+        .filter(|(name, _)| {
+            let mut components = std::path::Path::new(name.as_str()).components();
+            matches!(
+                (components.next(), components.next()),
+                (Some(std::path::Component::Normal(_)), None)
+            )
+        })
+        .map(|(name, _)| extensions_dir.join(name))
+        .filter(|path| path.symlink_metadata().is_ok_and(|m| m.is_dir()))
+        .collect()
 }
 
 /// Per-workspace state for a folder that is no longer on disk.
@@ -480,7 +552,7 @@ pub fn clean_editor_history(entry_path: &str, config: &Config) -> std::io::Resul
     let mut first_error = None;
     for dir in &aged {
         let size = walker::dir_size(dir);
-        match std::fs::remove_dir_all(dir) {
+        match crate::cleaner::delete_path(dir) {
             Ok(()) => freed += size,
             Err(e) => {
                 first_error.get_or_insert(e);
@@ -496,6 +568,27 @@ pub fn clean_editor_history(entry_path: &str, config: &Config) -> std::io::Resul
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn only_folders_the_editor_listed_as_obsolete_are_offered() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        for name in ["acme.tool-1.0.0", "acme.tool-1.1.0", "acme.kept-2.0.0"] {
+            std::fs::create_dir(dir.join(name)).expect("extension");
+        }
+        std::fs::write(
+            dir.join(".obsolete"),
+            r#"{"acme.tool-1.0.0": true, "acme.kept-2.0.0": false, "../escape": true, "gone-0.1.0": true}"#,
+        )
+        .expect("obsolete");
+
+        assert_eq!(obsolete_extensions(dir), vec![dir.join("acme.tool-1.0.0")]);
+        assert_eq!(
+            obsolete_extensions(&dir.join("missing")),
+            Vec::<std::path::PathBuf>::new()
+        );
+    }
+
     use super::*;
     use std::path::Path;
 

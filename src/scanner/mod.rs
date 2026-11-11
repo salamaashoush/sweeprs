@@ -1,6 +1,7 @@
 pub mod cli_cache;
 pub mod entry;
 pub mod project_index;
+pub mod tree;
 pub mod walker;
 
 #[cfg(target_os = "macos")]
@@ -88,13 +89,39 @@ fn configure_thread_pool(config: &Config) {
     }
 }
 
+/// Run `scan` while the disk summary is read beside it.
+///
+/// The full summary walks `/Applications` and the iCloud folders, as long as
+/// many rules take; it shares nothing with them, so it need not wait for them.
+fn with_disk_info<T: Send>(
+    full: bool,
+    scan: impl FnOnce() -> T + Send,
+) -> (T, Result<entry::DiskInfo>) {
+    thread::scope(|s| {
+        let disk = s.spawn(move || {
+            crate::rules::timed_phase("disk summary", || {
+                if full {
+                    platform::get_disk_info()
+                } else {
+                    platform::get_disk_info_fast()
+                }
+            })
+        });
+        let value = scan();
+        let disk_info = disk
+            .join()
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("disk summary panicked")));
+        (value, disk_info)
+    })
+}
+
 pub fn scan_all(config: &Config) -> Result<ScanResult> {
     configure_thread_pool(config);
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-    let mut result = engine.scan_all(config, None);
+    let (mut result, disk_info) = with_disk_info(true, || engine.scan_all(config, None));
     result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
-    result.disk_info = Some(platform::get_disk_info()?);
+    result.disk_info = Some(disk_info?);
     Ok(result)
 }
 
@@ -102,9 +129,10 @@ pub fn scan_category(config: &Config, category: Category) -> Result<ScanResult> 
     configure_thread_pool(config);
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-    let mut result = engine.scan_category(category, config, None);
+    let (mut result, disk_info) =
+        with_disk_info(false, || engine.scan_category(category, config, None));
     result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
-    result.disk_info = Some(platform::get_disk_info_fast()?);
+    result.disk_info = Some(disk_info?);
     Ok(result)
 }
 
@@ -116,13 +144,13 @@ pub fn scan_all_with_progress(config: &Config) -> Result<ScanResult> {
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-    let mut result = engine.scan_all(config, Some(&progress));
+    let (mut result, disk_info) = with_disk_info(true, || engine.scan_all(config, Some(&progress)));
     result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
 
     let _ = tick_handle.join();
     spinner.finish_and_clear();
 
-    result.disk_info = Some(platform::get_disk_info()?);
+    result.disk_info = Some(disk_info?);
     Ok(result)
 }
 
@@ -130,8 +158,8 @@ pub fn scan_all_streaming(config: &Config, tx: &mpsc::Sender<ScanUpdate>) {
     configure_thread_pool(config);
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-    engine.scan_all_streaming(config, tx);
-    let disk_info = platform::get_disk_info().ok();
+    let ((), disk_info) = with_disk_info(true, || engine.scan_all_streaming(config, tx));
+    let disk_info = disk_info.ok();
     let _ = tx.send(ScanUpdate::Finished {
         duration_secs: start.elapsed().as_secs_f64(),
         disk_info,
@@ -150,13 +178,15 @@ pub fn scan_categories_with_progress(
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-    let mut result = engine.scan_categories(categories, config, Some(&progress));
+    let (mut result, disk_info) = with_disk_info(false, || {
+        engine.scan_categories(categories, config, Some(&progress))
+    });
     result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
 
     let _ = tick_handle.join();
     spinner.finish_and_clear();
 
-    result.disk_info = Some(platform::get_disk_info_fast()?);
+    result.disk_info = Some(disk_info?);
     Ok(result)
 }
 
@@ -168,12 +198,14 @@ pub fn scan_category_with_progress(config: &Config, category: Category) -> Resul
 
     let engine = RuleEngine::new(config);
     let start = Instant::now();
-    let mut result = engine.scan_category(category, config, Some(&progress));
+    let (mut result, disk_info) = with_disk_info(false, || {
+        engine.scan_category(category, config, Some(&progress))
+    });
     result.scan_duration_secs = Some(start.elapsed().as_secs_f64());
 
     let _ = tick_handle.join();
     spinner.finish_and_clear();
 
-    result.disk_info = Some(platform::get_disk_info_fast()?);
+    result.disk_info = Some(disk_info?);
     Ok(result)
 }

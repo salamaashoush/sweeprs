@@ -28,15 +28,39 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(theme::ACCENT).bold(),
         ));
         if !app.streaming {
+            let from = app
+                .cached_at
+                .and_then(|at| std::time::SystemTime::now().duration_since(at).ok())
+                .map(|age| format!(" from {} ago", util::human_duration(age)))
+                .unwrap_or_default();
             spans.push(Span::styled(
-                ", showing previous results",
+                format!(", showing previous results{from}"),
                 Style::default().fg(theme::DIM),
             ));
         }
         spans.push(Span::styled(" | ", Style::default().fg(theme::DIM)));
     }
 
-    if sel_count > 0 {
+    if let Some(explorer) = &app.explorer {
+        spans.push(Span::styled(
+            format!(
+                " Exploring {} item{}, {}{}",
+                explorer.children.len(),
+                if explorer.children.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                util::human_size(explorer.total()),
+                if explorer.measuring() {
+                    " measured so far"
+                } else {
+                    ""
+                }
+            ),
+            Style::default().fg(theme::FG),
+        ));
+    } else if sel_count > 0 {
         spans.push(Span::styled(
             format!(
                 " Selected: {sel_count} item{}",

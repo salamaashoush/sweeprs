@@ -15,6 +15,7 @@ use crate::cleaner;
 use crate::config::Config;
 use crate::scanner::entry::{SafetyLevel, ScannedEntry};
 use crate::virtual_entry;
+use crate::{guard, in_use, journal};
 
 enum Update {
     Started(usize),
@@ -158,6 +159,7 @@ fn run(
     progress: &AtomicU64,
     tx: &Sender<Update>,
 ) {
+    let open_files = in_use::OpenFiles::snapshot();
     for (index, entry) in entries.iter().enumerate() {
         if stop.load(Ordering::Relaxed) {
             break;
@@ -166,7 +168,7 @@ fn run(
         if tx.send(Update::Started(index)).is_err() {
             return;
         }
-        let (freed, error) = delete_one(entry, config, progress);
+        let (freed, error) = delete_one(entry, config, open_files.as_ref(), progress);
         if tx
             .send(Update::Finished {
                 index,
@@ -184,6 +186,7 @@ fn run(
 fn delete_one(
     entry: &ScannedEntry,
     config: &Config,
+    open_files: Option<&in_use::OpenFiles>,
     progress: &AtomicU64,
 ) -> (u64, Option<String>) {
     if entry.safety == SafetyLevel::Error {
@@ -193,7 +196,11 @@ fn delete_one(
     if virtual_entry::is_virtual(&entry.path) {
         let path = entry.path.display().to_string();
         return match virtual_entry::clean(&path, config, config.git_gc_timeout()) {
-            Ok(freed) => (freed.unwrap_or(entry.size), None),
+            Ok(freed) => {
+                let freed = freed.unwrap_or(entry.size);
+                journal::record(entry, freed);
+                (freed, None)
+            }
             Err(e) => (0, Some(e.to_string())),
         };
     }
@@ -204,9 +211,19 @@ fn delete_one(
     if !entry.path.exists() {
         return (0, None);
     }
+    // Checked before any part goes: the parts are deleted ahead of the root.
+    if let Err(refusal) = guard::check(&entry.path) {
+        return (0, Some(refusal.to_string()));
+    }
+    if let Some(open) = open_files.and_then(|files| files.held_under(&entry.path)) {
+        return (0, Some(format!("in use: {} is open", open.display())));
+    }
 
     let result = delete_in_parts(&entry.path, progress);
     let freed = cleaner::measure_freed(entry, &result);
+    if freed > 0 {
+        journal::record(entry, freed);
+    }
     (freed, result.err().map(|e| e.to_string()))
 }
 

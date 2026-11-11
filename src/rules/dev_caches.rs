@@ -260,6 +260,77 @@ cache_rule!(
     ".cocoapods/repos"
 );
 
+cache_rule!(
+    ZigCacheRule,
+    "Zig global cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cache/zig",
+    "Library/Caches/zig"
+);
+
+cache_rule!(
+    BazeliskCacheRule,
+    "Bazelisk downloads",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cache/bazelisk",
+    "Library/Caches/bazelisk"
+);
+
+cache_rule!(
+    CabalPackagesRule,
+    "Cabal package downloads",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cabal/packages",
+    ".cache/cabal/packages"
+);
+
+// `hosted` only: `global_packages` and `bin` are tools installed with
+// `dart pub global activate`, which nothing reinstalls on its own.
+cache_rule!(
+    DartPubCacheRule,
+    "Dart pub cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".pub-cache/hosted",
+    ".pub-cache/git"
+);
+
+cache_rule!(
+    HexPackagesRule,
+    "Hex package cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".hex/packages",
+    ".cache/rebar3/hex"
+);
+
+cache_rule!(
+    OpamDownloadCacheRule,
+    "opam download cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".opam/download-cache"
+);
+
+cache_rule!(
+    JuliaCompiledRule,
+    "Julia precompile cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".julia/compiled"
+);
+
+cache_rule!(
+    FerridriverBytecodeRule,
+    "ferridriver bytecode cache",
+    Category::PackageCache,
+    SafetyLevel::Safe,
+    ".cache/ferridriver/bytecode"
+);
+
 pub fn rules() -> Vec<Box<dyn CleanupRule>> {
     vec![
         Box::new(BazelCacheRule),
@@ -292,5 +363,13 @@ pub fn rules() -> Vec<Box<dyn CleanupRule>> {
         Box::new(GradleNativeRule),
         Box::new(AndroidBuildCacheRule),
         Box::new(CocoaPodsReposRule),
+        Box::new(ZigCacheRule),
+        Box::new(BazeliskCacheRule),
+        Box::new(CabalPackagesRule),
+        Box::new(DartPubCacheRule),
+        Box::new(HexPackagesRule),
+        Box::new(OpamDownloadCacheRule),
+        Box::new(JuliaCompiledRule),
+        Box::new(FerridriverBytecodeRule),
     ]
 }
