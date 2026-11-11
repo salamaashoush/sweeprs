@@ -1,6 +1,15 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.9.0] - 2026-11-11
+
+### Features
+
+- Attribute leftovers to Codex, Gemini, Qwen, opencode, Cline, Roo
+
+### Bug Fixes
+
+- Guard every delete and stop rules removing live data
 ## [0.8.2] - 2026-09-30
 
 ### Bug Fixes
