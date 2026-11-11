@@ -85,7 +85,7 @@ pub fn copilot_home() -> PathBuf {
 
 /// Cline's data directory: `CLINE_DATA_DIR`, else `data` under `CLINE_DIR`
 /// or `~/.cline`.
-fn cline_data() -> PathBuf {
+pub(crate) fn cline_data() -> PathBuf {
     env_dir("CLINE_DATA_DIR").unwrap_or_else(|| {
         env_dir("CLINE_DIR")
             .unwrap_or_else(|| home().join(".cline"))
@@ -95,7 +95,7 @@ fn cline_data() -> PathBuf {
 
 /// The XDG data directory. Node and Go CLIs use it on macOS too, where
 /// `dirs::data_dir` would answer `~/Library/Application Support`.
-fn xdg_data() -> PathBuf {
+pub(crate) fn xdg_data() -> PathBuf {
     env_dir("XDG_DATA_HOME").unwrap_or_else(|| home().join(".local/share"))
 }
 

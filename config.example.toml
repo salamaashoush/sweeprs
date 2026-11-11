@@ -144,8 +144,9 @@ ai_tools = true
 # Danger, so `sweeprs clean` never touches it without an explicit request.
 agent_session = true
 stale_project = true
-# Directories coding agents created in cache and temp locations, found from
-# their session transcripts.
+# Directories coding agents (Claude Code, Codex, Gemini CLI, Qwen Code,
+# opencode, Cline, Roo Code) created in cache and temp locations, found from
+# their session records.
 agent_leftovers = true
 
 [monitor]

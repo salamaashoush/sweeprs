@@ -287,10 +287,13 @@ sweeprs config --path
 
 Agents build into `~/.cache/<name>-target`, clone reference repositories into
 `/tmp` and write scratch trees into `$TMPDIR`, and nothing but the session's
-transcript records whose they were. sweeprs reads Claude Code transcripts for
-the commands that create paths (`mkdir`, `git clone`, `git worktree add`,
+own record says whose they were. sweeprs reads the session records of Claude
+Code, Codex, Gemini CLI, Qwen Code, opencode (its SQLite database through the
+`sqlite3` shell, and the older JSON storage), Cline and Roo Code for the
+commands that create paths (`mkdir`, `git clone`, `git worktree add`,
 `--target-dir`, `CARGO_TARGET_DIR=`, copy and redirect targets) and the files
-the agent wrote, and lists a directory as `Left by "<session title>" (<date>)`
+the agent wrote, and lists a directory as
+`Left by <agent> "<session title>" (<date>)`
 only when:
 
 - it sits directly in `~/.cache`, `$TMPDIR`, `/tmp` or `/var/tmp`;
@@ -300,8 +303,9 @@ only when:
   hour;
 - it holds no socket or FIFO and you own all of it.
 
-Parsed transcripts are cached by size and modification time, so only a running
-session's transcript is read again.
+Parsed records are cached by size and modification time, so only a running
+session's record is read again. GitHub Copilot CLI is not covered: its source
+is not public and its session format is undocumented.
 
 To clean up as each session ends, add a `SessionEnd` hook to
 `~/.claude/settings.json`:
@@ -341,7 +345,7 @@ anything.
 | Simulators | `simulator` | Caution | iOS simulator runtimes and devices, Android AVDs and system images |
 | AI Tools | `ai` | Caution | Superseded Claude Code versions, Claude Desktop VM, Claude/Cursor/Codex/Copilot caches and downloaded extensions |
 | AI Agent Sessions | `agent-sessions` | Danger | Transcripts, chat threads, rewind checkpoints, scratchpads and clean pushed worktrees from Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI, Zed, opencode and other agents -- only once idle past the configured age |
-| Agent Leftovers | `agent-leftovers` | Caution | Directories agent sessions created in `~/.cache`, `$TMPDIR` and `/tmp`, attributed to the session from its transcript |
+| Agent Leftovers | `agent-leftovers` | Caution | Directories Claude Code, Codex, Gemini CLI, Qwen Code, opencode, Cline and Roo Code sessions created in `~/.cache`, `$TMPDIR` and `/tmp`, attributed to the session from its record |
 | Trash | `trash` | Danger | Trash contents (~/.Trash on macOS, ~/.local/share/Trash on Linux) |
 | Large Files | `large-files` | Danger | Files over 500 MB (configurable) |
 | Duplicates | `duplicates` | Danger | Identical files by content hash (disabled by default) |
